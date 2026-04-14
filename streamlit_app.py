@@ -1782,7 +1782,10 @@ st.markdown("""
 try:
     locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
 except locale.Error:
-    st.warning("Locale 'pt_BR.UTF-8' não encontrado.")
+    try:
+        locale.setlocale(locale.LC_ALL, 'pt_BR.utf8')
+    except locale.Error:
+        pass
 
 # =================================================
 # 🔹 CONFIGURAÇÕES GLOBAIS E REGRAS DE NEGÓCIO
@@ -2752,8 +2755,8 @@ def ordenar_destinos_geograficamente(destinos_da_viagem, rotas_completas, ordem_
 # ▲▲▲ FIM DA NOVA FUNÇÃO ▲▲▲
 
 
-# --- 3. CARREGAMENTO DOS DADOS ---
-caminho_do_arquivo = os.path.join("arquivos", "Relatorio_de_Viagens.xlsx")
+## --- 3. CARREGAMENTO DOS DADOS ---
+caminho_do_arquivo = os.path.join("Arquivos", "Relatorio_de_Viagens.xlsx")
 try:
     df_bruto = carregar_dados(caminho_do_arquivo)
 except FileNotFoundError:
