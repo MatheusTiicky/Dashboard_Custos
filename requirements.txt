@@ -1,0 +1,11 @@
+streamlit
+pandas
+numpy
+altair
+matplotlib
+folium
+streamlit-folium
+requests
+polyline
+streamlit-option-menu
+openpyxl
