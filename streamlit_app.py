@@ -8280,8 +8280,8 @@ with tab1:
                 return '' # Cor padrão
 
             # 3. Aplica a função de estilo diretamente na coluna desejada
-            #    O método .style.applymap() passa o valor de cada célula para a função.
-            styled_df = df_para_exibir_ordenado.style.applymap(
+            #    O método .style.map() passa o valor de cada célula para a função.
+            styled_df = df_para_exibir_ordenado.style.map(
                 colorir_celula_ctrb,
                 subset=['CTRB/Frete (%)']
             )
@@ -11374,7 +11374,7 @@ with tab5:
                         except (ValueError, TypeError): pass
                         return ''
 
-                    styled_df_tabela = df_para_exibir_tabela.style.applymap(colorir_celula_ctrb, subset=['CTRB/Frete (%)'])
+                    styled_df_tabela = df_para_exibir_tabela.style.map(colorir_celula_ctrb, subset=['CTRB/Frete (%)'])
                     
                     st.dataframe(styled_df_tabela, use_container_width=True, hide_index=True)
 
