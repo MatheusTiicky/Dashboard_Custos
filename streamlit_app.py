@@ -34,7 +34,33 @@ st.set_page_config(
 )
 
 
-# --- Tema fixo em Dark (configurado via .streamlit/config.toml) ---
+# --- Detect current theme (light/dark) to apply CSS properly ---
+def _km_get_theme_type():
+    """Return 'light' or 'dark' when possible; otherwise None."""
+    try:
+        ctx = getattr(st, "context", None)
+        if ctx is not None and isinstance(getattr(ctx, "theme", None), dict):
+            t = ctx.theme.get("type")
+            if isinstance(t, str):
+                t = t.lower().strip()
+                if t in ("light", "dark"):
+                    return t
+    except Exception:
+        pass
+
+    # Fallback: config option (may not reflect runtime toggle in some versions)
+    try:
+        base = st.get_option("theme.base")
+        if isinstance(base, str):
+            base = base.lower().strip()
+            if base in ("light", "dark"):
+                return base
+    except Exception:
+        pass
+
+    return None
+
+_KM_THEME = _km_get_theme_type()
 
 # CSS para customizar a aparência do título baseado na imagem de referência
 st.markdown("""
@@ -1048,6 +1074,179 @@ html[data-theme="light"] .main-title{
             
 """, unsafe_allow_html=True)
 
+
+if _KM_THEME == "light":
+    st.markdown("""
+    <style>
+    /* ================================
+       FORCE LIGHT PALETTE (runtime)
+       Applies only when Streamlit theme is Light (detected via st.context / config)
+       ================================ */
+
+    :root { color-scheme: light !important; }
+
+    body {
+        background-color: #f6f8fb !important;
+        color: #0f172a !important;
+    }
+    [data-testid="stAppViewContainer"]{
+        background-color: #f6f8fb !important;
+    }
+
+    section[data-testid="stSidebar"]{
+        background: #ffffff !important;
+        border-right: 1px solid rgba(15, 23, 42, 0.08) !important;
+    }
+
+    /* Text */
+    h1,h2,h3,h4,h5,h6,p,label,.stMarkdown{
+        color: #0f172a !important;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"]{
+        background-color: #ffffff !important;
+        border: 1px solid rgba(15, 23, 42, 0.10) !important;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06) !important;
+    }
+    .stTabs [data-baseweb="tab"]{
+        background: #f1f5f9 !important;
+        color: #334155 !important;
+        border: 1px solid rgba(15, 23, 42, 0.10) !important;
+        box-shadow: none !important;
+    }
+    .stTabs [data-baseweb="tab"]:hover{
+        background: #e2e8f0 !important;
+        color: #0f172a !important;
+        border-color: rgba(59, 130, 246, 0.35) !important;
+        box-shadow: 0 8px 22px rgba(59, 130, 246, 0.12) !important;
+    }
+    .stTabs [data-baseweb="tab"][aria-selected="true"]{
+        color: #ffffff !important;
+    }
+
+    /* Inputs */
+    .stSelectbox > div,
+    div[data-baseweb="select"] > div{
+        background-color: #ffffff !important;
+        border: 1px solid rgba(15, 23, 42, 0.12) !important;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+    }
+    .stSelectbox *{
+        color: #0f172a !important;
+    }
+    .custom-selectbox-label{
+        color: #64748b !important;
+    }
+
+    /* Custom cards */
+    .kpi-container,
+    .card-info,
+    .detail-card,
+    .ocupacao-card-custom{
+        background: #ffffff !important;
+        border: 1px solid rgba(15, 23, 42, 0.10) !important;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08) !important;
+    }
+    .kpi-title,
+    .card-title{
+        color: #64748b !important;
+    }
+    .kpi-value,
+    .card-value{
+        color: #0f172a !important;
+    }
+
+    .finance-kpi-card{
+        background: linear-gradient(180deg, #ffffff 0%, #f5f8fc 100%) !important;
+        box-shadow: 0 16px 30px rgba(15,23,42,0.10) !important;
+        border-color: rgba(148,163,184,0.22) !important;
+    }
+
+    .finance-kpi-title{
+        color: #5b6b7f !important;
+    }
+
+    .finance-kpi-icon{
+        background: linear-gradient(180deg, #f8fbff 0%, #eef4fa 100%) !important;
+        border-color: rgba(148,163,184,0.22) !important;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.9), 0 8px 18px rgba(15,23,42,0.06) !important;
+    }
+
+    .finance-kpi-value{
+        color: #0f172a !important;
+    }
+
+    .finance-kpi-divider{
+        background: linear-gradient(90deg, rgba(148,163,184,0.00) 0%, rgba(148,163,184,0.40) 18%, rgba(148,163,184,0.14) 100%) !important;
+    }
+
+    .finance-kpi-footer{
+        background: rgba(248,250,252,0.98) !important;
+        border-color: rgba(148,163,184,0.24) !important;
+        color: #475569 !important;
+    }
+
+    /* Section titles */
+    .section-title-modern,
+    .detail-section-title,
+    .detail-card-title,
+    .frota-title{
+        color: #0f172a !important;
+    }
+
+    /* Header blocks */
+    .title-block-modern,
+    .title-block-performance,
+    .title-block-rotas,
+    .title-block-temporal,
+    .title-block-financeira,
+    .title-block-motoristas{
+        background: linear-gradient(90deg, rgba(241,245,249,0.95) 0%, rgba(255,255,255,0.85) 100%) !important;
+        border: 1px solid rgba(15, 23, 42, 0.10) !important;
+        box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06) !important;
+    }
+    .title-block-modern h2,
+    .title-block-performance h2,
+    .title-block-rotas h2,
+    .title-block-temporal h2,
+    .title-block-financeira h2,
+    .title-block-motoristas h2{
+        color: #0f172a !important;
+    }
+
+    /* Day-of-week badge */
+    .dia-semana-box{
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid rgba(15, 23, 42, 0.10) !important;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06) !important;
+    }
+
+    /* Download button */
+    .custom-download-button{
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid rgba(15, 23, 42, 0.12) !important;
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08) !important;
+    }
+    .custom-download-button:hover{
+        background-color: #f1f5f9 !important;
+        border-color: rgba(59, 130, 246, 0.35) !important;
+        color: #0f172a !important;
+    }
+
+    /* Altair/Vega charts: ensure labels/titles are readable in Light */
+    .vega-embed svg text{
+        fill: #0f172a !important;
+    }
+    .vega-embed .role-axis text,
+    .vega-embed .role-legend text{
+        fill: #334155 !important;
+    }
+
+    </style>
+    """, unsafe_allow_html=True)
 
 st.markdown("""
     <style>
