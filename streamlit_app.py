@@ -11176,14 +11176,30 @@ with tab5:
 
                     def colorir_celula_ctrb(valor_texto):
                         try:
-                            v = float(valor_texto.strip('%'))
-                            if 0 <= v <= 25: return 'background-color: #2E7D32; color: white;'
-                            elif 26 <= v <= 45: return 'background-color: #FF8F00; color: white;'
-                            elif v >= 46: return 'background-color: #C62828; color: white;'
-                        except (ValueError, TypeError): pass
+                            if pd.isna(valor_texto):
+                                return ''
+                            v = float(str(valor_texto).replace('%', '').replace(',', '.').strip())
+                            if 0 <= v <= 25:
+                                return 'background-color: #2E7D32; color: white;'
+                            elif 26 <= v <= 45:
+                                return 'background-color: #FF8F00; color: white;'
+                            elif v >= 46:
+                                return 'background-color: #C62828; color: white;'
+                        except (ValueError, TypeError):
+                            pass
                         return ''
 
-                    styled_df_tabela = df_para_exibir_tabela.style.applymap(colorir_celula_ctrb, subset=['CTRB/Frete (%)'])
+                    styler_tabela = df_para_exibir_tabela.style
+                    if hasattr(styler_tabela, 'map'):
+                        styled_df_tabela = styler_tabela.map(
+                            colorir_celula_ctrb,
+                            subset=['CTRB/Frete (%)']
+                        )
+                    else:
+                        styled_df_tabela = styler_tabela.applymap(
+                            colorir_celula_ctrb,
+                            subset=['CTRB/Frete (%)']
+                        )
                     
                     st.dataframe(styled_df_tabela, use_container_width=True, hide_index=True)
 
