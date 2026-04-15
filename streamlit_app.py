@@ -1462,6 +1462,15 @@ st.markdown("""
         --panel-bottom: #0f9d74;
     }
 
+
+    .finance-kpi-card.transferencia {
+        --accent: #cbfbf1;
+        --accent-glow: rgba(45, 212, 191, 0.24);
+        --accent-border: rgba(45, 212, 191, 0.36);
+        --panel-top: #0f5b63;
+        --panel-bottom: #11a7ab;
+    }
+
     .finance-kpi-card.compact-card {
         min-height: 118px;
         padding: 14px 14px 12px 14px;
@@ -1589,7 +1598,8 @@ st.markdown("""
     html[data-theme="light"] .finance-kpi-card.overview-teal,
     html[data-theme="light"] .finance-kpi-card.overview-orange,
     html[data-theme="light"] .finance-kpi-card.overview-indigo,
-    html[data-theme="light"] .finance-kpi-card.overview-emerald {
+    html[data-theme="light"] .finance-kpi-card.overview-emerald,
+    html[data-theme="light"] .finance-kpi-card.transferencia {
         box-shadow: 0 16px 32px rgba(15,23,42,0.10) !important;
     }
     </style>
@@ -8424,7 +8434,10 @@ with tab2:
         st.warning("⚠️ Nenhum registro encontrado para os filtros selecionados.")
     else:
         # KPIs financeiros que foram movidos da primeira aba
-        kpi_f1, kpi_f2, kpi_f3, kpi_f4, kpi_f5 = st.columns(5)
+        kpi_f1, kpi_f2, kpi_f3, kpi_f4, kpi_f5, kpi_f6 = st.columns(6)
+
+        # Card adicional: custo de transferência (% do frete comprometido com CTRB/OS)
+        custo_transferencia = (custo_ctrb_os / receita_total * 100) if receita_total > 0 else 0
 
         # Lógica para determinar o título do KPI de Custo
         titulo_kpi_custo = "📄 Custo CTRB / OS" # Título padrão
@@ -8442,7 +8455,8 @@ with tab2:
             {"coluna": kpi_f2, "titulo": titulo_kpi_custo.replace("📄 ", "").replace("📋 ", ""), "valor": formatar_moeda(custo_ctrb_os), "classe": "custo", "icone": "fa-file-invoice-dollar", "rodape": "Custo base", "variacao": variacoes_financeiras.get("custo_ctrb_os"), "modo_variacao": "lower_better"},
             {"coluna": kpi_f3, "titulo": "ICMS", "valor": formatar_moeda(custo_icms), "classe": "custo", "icone": "fa-receipt", "rodape": "Tributação", "variacao": variacoes_financeiras.get("custo_icms"), "modo_variacao": "lower_better"},
             {"coluna": kpi_f4, "titulo": "Custo Total", "valor": formatar_moeda(custo_total), "classe": "custo", "icone": "fa-wallet", "rodape": "CTRB + ICMS", "variacao": variacoes_financeiras.get("custo_total"), "modo_variacao": "lower_better"},
-            {"coluna": kpi_f5, "titulo": "Lucro Líquido", "valor": formatar_moeda(lucro_estimado), "classe": "lucro", "icone": "fa-chart-line", "rodape": "Resultado final", "variacao": variacoes_financeiras.get("lucro_estimado"), "modo_variacao": "higher_better"}
+            {"coluna": kpi_f5, "titulo": "Lucro Líquido", "valor": formatar_moeda(lucro_estimado), "classe": "lucro", "icone": "fa-chart-line", "rodape": "Resultado final", "variacao": variacoes_financeiras.get("lucro_estimado"), "modo_variacao": "higher_better"},
+            {"coluna": kpi_f6, "titulo": "Custo de Transferência", "valor": formatar_percentual(custo_transferencia), "classe": "transferencia", "icone": "fa-arrow-right-arrow-left", "rodape": "Eficiência logística"}
         ]
 
         # Itera e exibe cada KPI
