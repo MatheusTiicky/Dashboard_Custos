@@ -23,6 +23,7 @@ import polyline # Biblioteca para decodificar a geometria da rota
 from folium import plugins # <<< ADICIONE ESTA LINHA
 from folium.plugins import Fullscreen
 import textwrap
+import re
 
 
 # --- 1. CONFIGURAÇÕES DA PÁGINA E ESTILO ---
@@ -1782,10 +1783,7 @@ st.markdown("""
 try:
     locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
 except locale.Error:
-    try:
-        locale.setlocale(locale.LC_ALL, 'pt_BR.utf8')
-    except locale.Error:
-        pass
+    st.warning("Locale 'pt_BR.UTF-8' não encontrado.")
 
 # =================================================
 # 🔹 CONFIGURAÇÕES GLOBAIS E REGRAS DE NEGÓCIO
@@ -1967,6 +1965,22 @@ def classificar_viagens_do_dia(df):
 
     return df
 
+
+def normalizar_tipo_veiculo_dashboard(valor):
+    """Padroniza o tipo de veículo exibido no dashboard."""
+    if pd.isna(valor):
+        return valor
+    valor_normalizado = str(valor).upper().strip()
+    return 'TRUCK' if valor_normalizado == '3/4 - CAMINHAO PEQUE' else valor_normalizado
+
+
+def obter_tipo_veiculo_base(row, coluna='TIPO_CAVALO'):
+    """Retorna o tipo original para cálculos internos, preservando regras de capacidade/custo."""
+    valor_base = row.get(f'{coluna}_ORIGINAL', row.get(coluna, ''))
+    if pd.isna(valor_base):
+        return ''
+    return str(valor_base).upper().strip()
+
 # --- 2. FUNÇÕES DE APOIO ---
 @st.cache_data
 def carregar_dados(caminho):
@@ -2005,6 +2019,12 @@ def carregar_dados(caminho):
     for col_texto in ['LACRES', 'SITUACAO', 'OBSERVAÇÕES']:
         if col_texto in df.columns:
             df[col_texto] = df[col_texto].astype(str)
+
+    if 'TIPO_CAVALO' in df.columns:
+        df['TIPO_CAVALO_ORIGINAL'] = df['TIPO_CAVALO'].apply(
+            lambda x: str(x).upper().strip() if pd.notna(x) else x
+        )
+        df['TIPO_CAVALO'] = df['TIPO_CAVALO_ORIGINAL'].apply(normalizar_tipo_veiculo_dashboard)
 
     return df
 
@@ -2287,11 +2307,23 @@ def render_financial_kpi_card(
     st.markdown(card_html, unsafe_allow_html=True)
 
 
-def render_overview_kpi_card(titulo, valor, icone="fa-chart-simple", rodape="Indicador operacional", classe="overview-slate", compact=True):
+def render_overview_kpi_card(
+    titulo,
+    valor,
+    icone="fa-chart-simple",
+    rodape="Indicador operacional",
+    classe="overview-slate",
+    compact=True,
+    extra_classes=""
+):
     """Renderiza cards da Visão Geral no mesmo padrão premium da Análise Financeira."""
-    classes = f"{classe}"
+    classes_list = [classe]
     if compact:
-        classes += " compact-card"
+        classes_list.append("compact-card")
+    if extra_classes:
+        classes_list.append(extra_classes)
+
+    classes = " ".join(classes_list)
 
     st.markdown(f"""
         <div class='finance-kpi-card {classes}'>
@@ -2755,8 +2787,8 @@ def ordenar_destinos_geograficamente(destinos_da_viagem, rotas_completas, ordem_
 # ▲▲▲ FIM DA NOVA FUNÇÃO ▲▲▲
 
 
-## --- 3. CARREGAMENTO DOS DADOS ---
-caminho_do_arquivo = os.path.join("Arquivos", "Relatorio_de_Viagens.xlsx")
+# --- 3. CARREGAMENTO DOS DADOS ---
+caminho_do_arquivo = os.path.join("arquivos", "Relatorio_de_Viagens.xlsx")
 try:
     df_bruto = carregar_dados(caminho_do_arquivo)
 except FileNotFoundError:
@@ -2994,8 +3026,9 @@ total_registros = len(df_sem_na_emissao)
 dados_periodo_validos = True
 
 # Define o valor padrão somente na primeira carga da sessão
+# A dashboard passa a iniciar sempre em "Dia Específico" com a data operacional mais recente.
 if "periodo_tipo" not in st.session_state:
-    st.session_state["periodo_tipo"] = "Mês Completo"
+    st.session_state["periodo_tipo"] = "Dia Específico"
 
 periodo_tipo = periodo_sidebar.radio(
     "Filtrar por data OPERACIONAL:", # <-- Texto atualizado para clareza
@@ -3004,6 +3037,13 @@ periodo_tipo = periodo_sidebar.radio(
 )
 
 data_padrao_inteligente = max_data_emissao
+
+# Garante que, ao iniciar a sessão, a data selecionada seja sempre a mais recente disponível.
+if "data_emissao_especifica" not in st.session_state:
+    st.session_state["data_emissao_especifica"] = data_padrao_inteligente
+elif st.session_state["data_emissao_especifica"] < min_data_emissao or st.session_state["data_emissao_especifica"] > max_data_emissao:
+    st.session_state["data_emissao_especifica"] = data_padrao_inteligente
+
 df_periodo_filtrado = df_original.copy()
 
 # =========================================================
@@ -4763,308 +4803,174 @@ with tab1:
                     .fillna(0)
                 )
 
-                serie_financeira['PERIODO_TOOLTIP'] = serie_financeira['PERIODO_DT'].dt.strftime('%d/%m/%Y')
-                titulo_valor_periodo = 'Valor do período'
-
-                if granularidade_tendencia == 'Semanal':
-                    serie_financeira['PERIODO_TOOLTIP'] = serie_financeira['PERIODO_DT'].apply(
-                        lambda ts: f"Semana de {ts.strftime('%d/%m/%Y')} a {(ts + pd.Timedelta(days=6)).strftime('%d/%m/%Y')}"
-                    )
-                    titulo_valor_periodo = 'Valor da semana'
-                elif granularidade_tendencia == 'Mensal':
-                    serie_financeira['PERIODO_TOOLTIP'] = serie_financeira['PERIODO_DT'].dt.strftime('%m/%Y')
-                    titulo_valor_periodo = 'Valor do mês'
-                else:
-                    titulo_valor_periodo = 'Valor do dia'
-
-                for serie_nome in ['Receita', 'Custo', 'Lucro']:
-                    serie_financeira[f'{serie_nome}_PERIODO'] = serie_financeira[serie_nome]
-                    serie_financeira[f'{serie_nome}_ACUMULADO'] = serie_financeira[serie_nome].cumsum()
-
-                eixo_x_formato = '%d/%m'
+                # No modo diário, exibe somente dias úteis (segunda a sexta).
                 if granularidade_tendencia == 'Diária':
-                    eixo_x_formato = '%d' if serie_financeira['PERIODO_DT'].dt.to_period('M').nunique() == 1 else '%d/%m'
-                elif granularidade_tendencia == 'Mensal':
-                    eixo_x_formato = '%m/%y'
+                    serie_financeira = serie_financeira[
+                        serie_financeira['PERIODO_DT'].dt.dayofweek < 5
+                    ].copy()
 
-                registros_long = []
-                for serie_nome in ['Receita', 'Custo', 'Lucro']:
-                    df_temp = serie_financeira[['PERIODO_DT', 'PERIODO_LABEL', 'PERIODO_TOOLTIP']].copy()
-                    df_temp['Serie'] = serie_nome
-                    df_temp['ValorPeriodo'] = serie_financeira[f'{serie_nome}_PERIODO']
-                    df_temp['ValorAcumulado'] = serie_financeira[f'{serie_nome}_ACUMULADO']
-                    registros_long.append(df_temp)
+                # Remove dias/períodos sem movimentação para não poluir o gráfico com pontos zerados.
+                serie_financeira = serie_financeira[
+                    serie_financeira[['Receita', 'Custo', 'Lucro']].abs().sum(axis=1) > 0
+                ].copy()
 
-                serie_financeira_long = pd.concat(registros_long, ignore_index=True)
+                if not serie_financeira.empty:
+                    mapa_dias_semana = {
+                        0: 'Segunda-feira',
+                        1: 'Terça-feira',
+                        2: 'Quarta-feira',
+                        3: 'Quinta-feira',
+                        4: 'Sexta-feira',
+                        5: 'Sábado',
+                        6: 'Domingo'
+                    }
 
-                campo_valor_grafico = 'ValorPeriodo' if modo_visualizacao == 'Por período' else 'ValorAcumulado'
-                titulo_valor_grafico = titulo_valor_periodo if modo_visualizacao == 'Por período' else 'Valor acumulado'
-                tooltip_grafico = [
-                    alt.Tooltip('PERIODO_TOOLTIP:N', title='Período'),
-                    alt.Tooltip('Serie:N', title='Série'),
-                    alt.Tooltip(f'{campo_valor_grafico}:Q', title=titulo_valor_grafico, format=',.2f')
-                ]
-                if modo_visualizacao == 'Por período':
-                    tooltip_grafico.append(
-                        alt.Tooltip('ValorAcumulado:Q', title='Valor acumulado', format=',.2f')
-                    )
-                else:
-                    tooltip_grafico.append(
-                        alt.Tooltip('ValorPeriodo:Q', title=titulo_valor_periodo, format=',.2f')
-                    )
+                    serie_financeira['PERIODO_TOOLTIP'] = serie_financeira['PERIODO_DT'].dt.strftime('%d/%m/%Y')
+                    serie_financeira['DIA_SEMANA_TOOLTIP'] = serie_financeira['PERIODO_DT'].dt.dayofweek.map(mapa_dias_semana)
+                    titulo_valor_periodo = '💰 Valor do período'
 
-                base_tendencia = alt.Chart(serie_financeira_long).encode(
-                    x=alt.X(
-                        'PERIODO_DT:T',
-                        title=None,
-                        axis=alt.Axis(
-                            format=eixo_x_formato,
-                            labelAngle=0,
-                            labelColor='#cbd5e1',
-                            labelFontSize=11,
-                            tickColor='#22324f',
-                            domain=False,
-                            grid=False
+                    if granularidade_tendencia == 'Semanal':
+                        serie_financeira['PERIODO_TOOLTIP'] = serie_financeira['PERIODO_DT'].apply(
+                            lambda ts: f"{ts.strftime('%d/%m/%Y')} a {(ts + pd.Timedelta(days=6)).strftime('%d/%m/%Y')}"
                         )
-                    ),
-                    y=alt.Y(
-                        f'{campo_valor_grafico}:Q',
-                        title=None,
-                        axis=alt.Axis(
-                            format='~s',
-                            labelColor='#cbd5e1',
-                            labelFontSize=11,
-                            tickColor='#22324f',
-                            domain=False,
-                            grid=True,
-                            gridColor='rgba(71, 85, 105, 0.22)'
+                        serie_financeira['DIA_SEMANA_TOOLTIP'] = serie_financeira['PERIODO_DT'].dt.dayofweek.map(mapa_dias_semana).apply(
+                            lambda dia: f"Semana iniciando em {dia}"
                         )
-                    ),
-                    color=alt.Color(
-                        'Serie:N',
-                        title=None,
-                        scale=alt.Scale(
-                            domain=['Receita', 'Custo', 'Lucro'],
-                            range=['#1ea7ff', '#f59e0b', '#22c55e']
+                        serie_financeira['PERIODO_EIXO'] = serie_financeira['PERIODO_DT'].dt.strftime('%d/%m')
+                        titulo_valor_periodo = '💰 Valor da semana'
+                    elif granularidade_tendencia == 'Mensal':
+                        serie_financeira['PERIODO_TOOLTIP'] = serie_financeira['PERIODO_DT'].dt.strftime('%m/%Y')
+                        serie_financeira['DIA_SEMANA_TOOLTIP'] = serie_financeira['PERIODO_DT'].dt.strftime('%B de %Y').str.capitalize()
+                        serie_financeira['PERIODO_EIXO'] = serie_financeira['PERIODO_DT'].dt.strftime('%m/%Y')
+                        titulo_valor_periodo = '💰 Valor do mês'
+                    else:
+                        serie_financeira['PERIODO_EIXO'] = serie_financeira['PERIODO_DT'].dt.strftime('%d/%m')
+                        titulo_valor_periodo = '💰 Valor do dia'
+
+                    for serie_nome in ['Receita', 'Custo', 'Lucro']:
+                        serie_financeira[f'{serie_nome}_PERIODO'] = serie_financeira[serie_nome]
+                        serie_financeira[f'{serie_nome}_ACUMULADO'] = serie_financeira[serie_nome].cumsum()
+
+                    ordem_periodos = serie_financeira['PERIODO_EIXO'].tolist()
+                    configuracao_series = {
+                        'Receita': {'label': '🔵 Receita', 'cor': '#1ea7ff'},
+                        'Custo': {'label': '🟠 Custo', 'cor': '#f59e0b'},
+                        'Lucro': {'label': '🟢 Lucro', 'cor': '#22c55e'}
+                    }
+
+                    registros_long = []
+                    for serie_nome in ['Receita', 'Custo', 'Lucro']:
+                        df_temp = serie_financeira[['PERIODO_DT', 'PERIODO_LABEL', 'PERIODO_TOOLTIP', 'DIA_SEMANA_TOOLTIP', 'PERIODO_EIXO']].copy()
+                        df_temp['Serie'] = serie_nome
+                        df_temp['SerieLabel'] = configuracao_series.get(serie_nome, {}).get('label', serie_nome)
+                        df_temp['ValorPeriodo'] = serie_financeira[f'{serie_nome}_PERIODO']
+                        df_temp['ValorAcumulado'] = serie_financeira[f'{serie_nome}_ACUMULADO']
+                        df_temp['ValorPeriodoFmt'] = df_temp['ValorPeriodo'].apply(formatar_moeda)
+                        df_temp['ValorAcumuladoFmt'] = df_temp['ValorAcumulado'].apply(formatar_moeda)
+                        registros_long.append(df_temp)
+
+                    serie_financeira_long = pd.concat(registros_long, ignore_index=True)
+
+                    dominio_legenda = [
+                        configuracao_series['Receita']['label'],
+                        configuracao_series['Custo']['label'],
+                        configuracao_series['Lucro']['label']
+                    ]
+                    cores_legenda = [
+                        configuracao_series['Receita']['cor'],
+                        configuracao_series['Custo']['cor'],
+                        configuracao_series['Lucro']['cor']
+                    ]
+
+                    campo_valor_grafico = 'ValorPeriodo' if modo_visualizacao == 'Por período' else 'ValorAcumulado'
+                    tooltip_grafico = [
+                        alt.Tooltip('PERIODO_TOOLTIP:N', title='📅 Período'),
+                        alt.Tooltip('DIA_SEMANA_TOOLTIP:N', title='🗓️ Dia da semana'),
+                        alt.Tooltip('SerieLabel:N', title='✨ Indicador')
+                    ]
+                    if modo_visualizacao == 'Por período':
+                        tooltip_grafico.extend([
+                            alt.Tooltip('ValorPeriodoFmt:N', title=titulo_valor_periodo),
+                            alt.Tooltip('ValorAcumuladoFmt:N', title='📈 Acumulado até aqui')
+                        ])
+                    else:
+                        tooltip_grafico.extend([
+                            alt.Tooltip('ValorAcumuladoFmt:N', title='📈 Valor acumulado'),
+                            alt.Tooltip('ValorPeriodoFmt:N', title=titulo_valor_periodo)
+                        ])
+
+                    base_tendencia = alt.Chart(serie_financeira_long).encode(
+                        x=alt.X(
+                            'PERIODO_EIXO:N',
+                            sort=ordem_periodos,
+                            title=None,
+                            axis=alt.Axis(
+                                labelAngle=0,
+                                labelColor='#cbd5e1',
+                                labelFontSize=11,
+                                labelOverlap=False,
+                                tickColor='#22324f',
+                                domain=False,
+                                grid=False
+                            )
                         ),
-                        legend=alt.Legend(
-                            orient='top-left',
-                            direction='horizontal',
-                            labelColor='#e2e8f0',
-                            symbolType='stroke',
-                            symbolStrokeWidth=4,
-                            padding=0,
-                            offset=6
-                        )
-                    ),
-                    tooltip=tooltip_grafico
-                )
+                        y=alt.Y(
+                            f'{campo_valor_grafico}:Q',
+                            title=None,
+                            axis=alt.Axis(
+                                format='~s',
+                                labelColor='#cbd5e1',
+                                labelFontSize=11,
+                                tickColor='#22324f',
+                                domain=False,
+                                grid=True,
+                                gridColor='rgba(71, 85, 105, 0.22)'
+                            )
+                        ),
+                        color=alt.Color(
+                            'SerieLabel:N',
+                            title=None,
+                            scale=alt.Scale(
+                                domain=dominio_legenda,
+                                range=cores_legenda
+                            ),
+                            legend=alt.Legend(
+                                orient='top',
+                                direction='horizontal',
+                                columns=3,
+                                labelColor='#e2e8f0',
+                                symbolType='stroke',
+                                symbolStrokeWidth=4,
+                                padding=6,
+                                offset=10
+                            )
+                        ),
+                        tooltip=tooltip_grafico
+                    )
 
-                linhas_tendencia = base_tendencia.mark_line(interpolate='linear', strokeWidth=3.2)
-                pontos_tendencia = base_tendencia.mark_circle(size=34, opacity=0.95)
+                    linhas_tendencia = base_tendencia.mark_line(interpolate='linear', strokeWidth=3.2)
+                    pontos_tendencia = base_tendencia.mark_circle(size=34, opacity=0.95)
 
-                chart_tendencia_financeira = (
-                    linhas_tendencia + pontos_tendencia
-                ).properties(height=450).configure(
-                    background='transparent'
-                ).configure_view(
-                    stroke=None,
-                    fill='transparent'
-                ).configure_legend(
-                    labelFontSize=12,
-                    symbolSize=400,
-                    title=None
-                )
+                    chart_tendencia_financeira = (
+                        linhas_tendencia + pontos_tendencia
+                    ).properties(height=450).configure(
+                        background='transparent'
+                    ).configure_view(
+                        stroke=None,
+                        fill='transparent'
+                    ).configure_legend(
+                        labelFontSize=12,
+                        symbolSize=400,
+                        title=None
+                    )
 
-                st.altair_chart(chart_tendencia_financeira, use_container_width=True)
+                    st.altair_chart(chart_tendencia_financeira, use_container_width=True)
+                else:
+                    st.info('Não há dias com movimentação para exibir nesse gráfico com os filtros atuais.')
             else:
                 st.info('Não há dados suficientes para montar a evolução financeira com os filtros atuais.')
 
             st.markdown('</div>', unsafe_allow_html=True)
-
-        st.markdown('<hr style="border: 1px solid #333; margin: 20px 0;">', unsafe_allow_html=True)
-
-        # ==============================
-        # 5. DETALHES OPERACIONAIS (TOTAIS)
-        # ==============================
-        st.markdown('<h3 class="section-title-modern"><i class="fa-solid fa-gears"></i> Detalhes Operacionais</h3>', unsafe_allow_html=True)
-
-        # --- LÓGICA CORRIGIDA PARA KPIs DINÂMICOS ---
-        # Verifica se o DataFrame filtrado representa uma única viagem.
-        # Isso funciona tanto para a seleção de "Viagem Específica" quanto para um "Grupo de Rota" que resulta em uma única viagem.
-        is_single_trip = df_filtrado['VIAGEM_ID'].nunique() == 1 if 'VIAGEM_ID' in df_filtrado.columns and not df_filtrado.empty else False
-
-        if is_single_trip:
-            # --- MODO VIAGEM ÚNICA: Exibe detalhes específicos da viagem selecionada ---
-            
-            # 1. CALCULAR OS NOVOS VALORES
-            qtd_ctrc_total = df_filtrado.get('QTDE_CTRC', pd.Series(0)).sum()
-            volumes_total = df_filtrado.get('VOLUMES', pd.Series(0)).sum()
-            
-            custo_por_km = valor_por_km 
-
-            volume_exibicao = volume_total
-            try:
-                if volume_exibicao > 100:
-                    volume_exibicao = volume_exibicao / 10000
-            except Exception:
-                volume_exibicao = 0
-            volume_formatado_correto = f"{volume_exibicao:,.3f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            distancia_formatada = f"{int(distancia_estimada_km):,} KM".replace(",", ".")
-
-            ocultar_cards_secundarios_viagem = (
-                periodo_tipo == "Dia Específico" and viagem_especifica_sel != "(Todos)"
-            )
-
-            kpis_viagem_unica = [
-                {"titulo": "Custo por KM", "valor": formatar_moeda(custo_por_km), "icone": "fa-road", "rodape": "Custo unitário", "classe": "overview-orange"},
-                {"titulo": "Valor da Mercadoria", "valor": formatar_moeda(valor_mercadoria_total), "icone": "fa-sack-dollar", "rodape": "Carga transportada", "classe": "overview-emerald"},
-                {"titulo": "Peso Total (KG)", "valor": f"{formatar_numero(peso_total)} KG", "icone": "fa-weight-hanging", "rodape": "Peso embarcado", "classe": "overview-blue"},
-                {"titulo": "Qtd. CTRCs", "valor": formatar_numero(qtd_ctrc_total), "icone": "fa-file-lines", "rodape": "Documentos emitidos", "classe": "overview-indigo"}
-            ]
-
-            if not ocultar_cards_secundarios_viagem:
-                kpis_viagem_unica.extend([
-                    {"titulo": "Volumes", "valor": formatar_numero(volumes_total), "icone": "fa-boxes-stacked", "rodape": "Volumes expedidos", "classe": "overview-slate"},
-                    {"titulo": "Volume (M³)", "valor": volume_formatado_correto, "icone": "fa-cubes-stacked", "rodape": "Espaço ocupado", "classe": "overview-teal"},
-                    {"titulo": "Distância (KM)", "valor": distancia_formatada, "icone": "fa-map-location-dot", "rodape": "Percurso estimado", "classe": "overview-blue"}
-                ])
-
-            linha1 = st.columns(4)
-
-            for coluna, info in zip(linha1, kpis_viagem_unica[:4]):
-                with coluna:
-                    render_overview_kpi_card(
-                        titulo=info['titulo'],
-                        valor=info['valor'],
-                        icone=info['icone'],
-                        rodape=info['rodape'],
-                        classe=info['classe']
-                    )
-
-            if len(kpis_viagem_unica) > 4:
-                linha2 = st.columns(3)
-
-                for coluna, info in zip(linha2, kpis_viagem_unica[4:]):
-                    with coluna:
-                        render_overview_kpi_card(
-                            titulo=info['titulo'],
-                            valor=info['valor'],
-                            icone=info['icone'],
-                            rodape=info['rodape'],
-                            classe=info['classe']
-                        )
-
-        else:
-            # --- MODO VISÃO GERAL: Exibe KPIs agregados de todas as viagens no período ---
-            
-            # 1. Calcula os KPIs agregados (TOTAIS)
-            total_viagens = df_filtrado.groupby(['MOTORISTA', 'PLACA_CAVALO', 'DIA_EMISSAO_STR']).ngroups if not df_filtrado.empty else 0
-            
-            if not df_filtrado.empty:
-                entregas_por_viagem = df_filtrado.groupby(['PLACA_CAVALO', 'DIA_EMISSAO_STR'])['DEST_MANIF'].nunique()
-                total_entregas = entregas_por_viagem.sum()
-            else:
-                total_entregas = 0
-            
-            cidades_atendidas = df_filtrado['CIDADE_UF_DEST'].nunique()
-
-            distancia_total_agregada = 0
-            if not df_filtrado.empty:
-                df_temp = df_filtrado.copy()
-                df_temp['VIAGEM_ID'] = df_temp.groupby(['MOTORISTA', 'PLACA_CAVALO', 'DIA_EMISSAO_STR']).ngroup()
-                resumo_temp = df_temp.groupby('VIAGEM_ID').agg(
-                    PROPRIETARIO=('PROPRIETARIO_CAVALO', 'first'), CUSTO_OS=('OS-R$', 'max'),
-                    CUSTO_CTRB=('CTRB-R$', 'max'), DESTINOS=('DEST_MANIF', lambda x: ' / '.join(x.unique())),
-                    TIPO_VEICULO=('TIPO_CAVALO', 'first')
-                ).reset_index()
-                def calcular_custo_viagem_temp(row):
-                    custo_base = row['CUSTO_CTRB'] if row['PROPRIETARIO'] != 'MARCELO H LEMOS BERALDO E CIA LTDA ME' else row['CUSTO_OS']
-                    destinos_str = str(row.get('DESTINOS', '')).upper()
-                    if 'GYN' in destinos_str or 'SPO' in destinos_str: return custo_base / 2
-                    return custo_base
-                resumo_temp['CUSTO_FINAL'] = resumo_temp.apply(calcular_custo_viagem_temp, axis=1)
-                def calcular_distancia_viagem_temp(row):
-                    custo_km_por_tipo = {'TOCO': 3.50, 'TRUCK': 4.50, 'CAVALO': 6.75, 'CARRETA': 6.75}
-                    tipo_veiculo = str(row.get('TIPO_VEICULO', 'PADRAO')).upper()
-                    valor_km = custo_km_por_tipo.get(tipo_veiculo, 0)
-                    if valor_km > 0: return row['CUSTO_FINAL'] / valor_km
-                    return 0
-                resumo_temp['DISTANCIA_VIAGEM'] = resumo_temp.apply(calcular_distancia_viagem_temp, axis=1)
-                distancia_total_agregada = resumo_temp['DISTANCIA_VIAGEM'].sum()
-
-            distancia_formatada_kpi = f"{int(distancia_total_agregada):,} KM".replace(",", ".")
-
-            kpis_totais_visao_geral = [
-                {"titulo": "Total de Viagens", "valor": formatar_numero(total_viagens), "icone": "fa-route", "rodape": "Saídas consolidadas", "classe": "overview-indigo"},
-                {"titulo": "Total de Entregas", "valor": formatar_numero(total_entregas), "icone": "fa-dolly", "rodape": "Destinos atendidos", "classe": "overview-blue"},
-                {"titulo": "Peso Total (KG)", "valor": f"{formatar_numero(peso_total)} KG", "icone": "fa-weight-hanging", "rodape": "Carga total", "classe": "overview-teal"},
-                {"titulo": "Cidades Atendidas", "valor": formatar_numero(cidades_atendidas), "icone": "fa-city", "rodape": "Cobertura operacional", "classe": "overview-slate"},
-                {"titulo": "Distância Total (KM)", "valor": distancia_formatada_kpi, "icone": "fa-map-location-dot", "rodape": "Percurso acumulado", "classe": "overview-orange"}
-            ]
-
-            for coluna, info in zip(st.columns(5), kpis_totais_visao_geral):
-                with coluna:
-                    render_overview_kpi_card(
-                        titulo=info['titulo'],
-                        valor=info['valor'],
-                        icone=info['icone'],
-                        rodape=info['rodape'],
-                        classe=info['classe']
-                    )
-
-        st.markdown('<hr style="border: 1px solid #333; margin: 20px 0;">', unsafe_allow_html=True)
-
-
-        # 6. MÉDIAS OPERACIONAIS POR VIAGEM (NOVA SEÇÃO)
-        if rota_sel_visivel == "(Todos)" and not is_single_trip:  # Só exibe na visão geral (não em viagem única)
-            st.markdown(
-                '<h3 class="section-title-modern"><i class="fa-solid fa-chart-line"></i> Médias Operacionais por Viagem</h3>',
-                unsafe_allow_html=True
-            )
-            
-            # 1. Calcula os totais necessários para as médias
-            # Reutiliza os totais já calculados
-            # total_viagens, total_entregas, peso_total, custo_ctrb_os, distancia_total_agregada
-
-            ### MUDANÇA 1: CÁLCULO DA CAPACIDADE TOTAL E OCUPAÇÃO MÉDIA ###
-            capacidade_total_agregada = 0
-            if not df_filtrado.empty:
-                # Usamos o resumo_temp que já agrupa por viagem
-                capacidades_veiculos = {'TOCO': 10000, 'TRUCK': 16000, 'CAVALO': 25000, 'CARRETA': 25000, 'PADRAO': 25000}
-                
-                # Para capacidade do cavalo/truck, usamos 'CAPAC_CAVALO'
-                # Para capacidade da carreta, usamos 'CAPACIDADE_KG'
-                # Vamos simplificar pegando a capacidade do TIPO de veículo para o cálculo da média
-                resumo_temp['CAPACIDADE_VIAGEM'] = resumo_temp['TIPO_VEICULO'].apply(lambda x: capacidades_veiculos.get(str(x).upper(), 25000))
-                capacidade_total_agregada = resumo_temp['CAPACIDADE_VIAGEM'].sum()
-
-            # 2. Calcula as médias (com proteção contra divisão por zero)
-            distancia_media = distancia_total_agregada / total_viagens if total_viagens > 0 else 0
-            entregas_media = total_entregas / total_viagens if total_viagens > 0 else 0
-            peso_medio = peso_total / total_viagens if total_viagens > 0 else 0
-            custo_medio = custo_ctrb_os / total_viagens if total_viagens > 0 else 0
-            ocupacao_media = (peso_total / capacidade_total_agregada * 100) if capacidade_total_agregada > 0 else 0
-
-
-            kpis_medios_visao_geral = [
-                {"titulo": "Distância Média", "valor": f"{int(distancia_media):,} km".replace(",", "."), "icone": "fa-road", "rodape": "Percurso por viagem", "classe": "overview-blue"},
-                {"titulo": "Entregas / Viagem", "valor": formatar_numero(entregas_media, 0), "icone": "fa-dolly", "rodape": "Ritmo operacional", "classe": "overview-indigo"},
-                {"titulo": "Peso Médio", "valor": f"{formatar_numero(peso_medio)} kg", "icone": "fa-weight-hanging", "rodape": "Carga média", "classe": "overview-teal"},
-                {"titulo": "Ocupação Média", "valor": f"{ocupacao_media:.0f}%", "icone": "fa-percent", "rodape": "Uso de capacidade", "classe": "overview-slate"},
-                {"titulo": "Custo Médio CTRB", "valor": formatar_moeda(custo_medio), "icone": "fa-tags", "rodape": "Custo por viagem", "classe": "overview-orange"}
-            ]
-
-            for coluna, info in zip(st.columns(5), kpis_medios_visao_geral):
-                with coluna:
-                    render_overview_kpi_card(
-                        titulo=info['titulo'],
-                        valor=info['valor'],
-                        icone=info['icone'],
-                        rodape=info['rodape'],
-                        classe=info['classe']
-                    )
-        ### FIM DO BLOCO DE CÓDIGO ###
 
         st.markdown('<hr style="border: 1px solid #333; margin: 20px 0;">', unsafe_allow_html=True)
         # 🌟 CSS PROFISSIONAL PARA A SEÇÃO DE OCUPAÇÃO
@@ -6145,7 +6051,7 @@ with tab1:
                         return row['CAPACIDADE_KG']
                     if row['CAPAC_CAVALO'] > 0:
                         return row['CAPAC_CAVALO']
-                    tipo_veiculo = str(row['TIPO_CAVALO']).upper()
+                    tipo_veiculo = obter_tipo_veiculo_base(row)
                     return capacidades_padrao_veiculo_sozinho.get(tipo_veiculo, 0)
                 
                 viagens_unicas['CAPACIDADE_PESO_VIAGEM'] = viagens_unicas.apply(get_capacidade_viagem_peso, axis=1)
@@ -6157,7 +6063,7 @@ with tab1:
                 
                 # --- LÓGICA DE CAPACIDADE DE VOLUME ---
                 capacidades_volume_por_tipo = {'TRUCK': 75, 'CAVALO': 110, 'TOCO': 55, '3/4 - CAMINHAO PEQUE': 40, 'PADRAO': 80}
-                viagens_unicas['CAP_VOL_VIAGEM'] = viagens_unicas['TIPO_CAVALO'].map(capacidades_volume_por_tipo).fillna(80)
+                viagens_unicas['CAP_VOL_VIAGEM'] = viagens_unicas.get('TIPO_CAVALO_ORIGINAL', viagens_unicas['TIPO_CAVALO']).map(capacidades_volume_por_tipo).fillna(80)
                 
                 # Soma a capacidade de volume de cada viagem
                 dados['cap_total_volume'] = viagens_unicas['CAP_VOL_VIAGEM'].sum()
@@ -6703,12 +6609,312 @@ with tab1:
                 return f"R$ {formatar_numero(valor_mil, decimais)} mil"
 
             badge_ops_viagens = f"{formatar_numero(total_viagens_ind)} viagens"
-            badge_ops_peso = f"{formatar_numero(total_peso_ind / 1000, 0)} t"
-            badge_ops_ocup = f"{formatar_percentual(ocupacao_peso_ind)} ocupação"
-            badge_fin_ctrb = f"CTRB/Frete: {formatar_percentual(ctrb_frete_ind)}"
+            badge_ops_distancia = f"Distância: {formatar_numero(distancia_estimada_km, 0)} km"
             badge_fin_frete = f"Frete: {formatar_resumo_mil(total_frete_ind, 0)}"
-            badge_fin_icms = f"ICMS: {formatar_resumo_mil(total_icms_ind, 0)}"
+            badge_fin_custo_km = f"Custo / KM: {formatar_moeda(valor_por_km)}"
 
+            def preparar_dados_grafico_ocupacao(df_dados):
+                if df_dados.empty:
+                    return pd.DataFrame()
+
+                df_chart = df_dados.copy()
+
+                if 'CATEGORIA_VIAGEM' not in df_chart.columns:
+                    df_chart['CATEGORIA_VIAGEM'] = df_chart.apply(definir_categoria_viagem, axis=1)
+
+                if 'VIAGEM_UNICA_ID' not in df_chart.columns:
+                    df_chart['VIAGEM_UNICA_ID'] = df_chart.groupby(['PLACA_CAVALO', 'DIA_EMISSAO_STR', 'MOTORISTA']).ngroup()
+
+                df_chart = garantir_coluna_peso_calculo(df_chart)
+                df_chart['Peso Cálculo (KG)'] = pd.to_numeric(df_chart['Peso Cálculo (KG)'], errors='coerce').fillna(0)
+                df_chart['M3'] = pd.to_numeric(df_chart.get('M3', 0), errors='coerce').fillna(0)
+
+                viagens_unicas = df_chart.drop_duplicates(subset=['VIAGEM_UNICA_ID']).copy()
+                capacidades_padrao_veiculo_sozinho = {
+                    'TRUCK': 16000,
+                    'TOCO': 10000,
+                    '3/4 - CAMINHAO PEQUE': 4500
+                }
+
+                def get_capacidade_viagem_peso(row):
+                    if pd.notna(row['PLACA_CARRETA']) and row['PLACA_CARRETA'] != '' and row['CAPACIDADE_KG'] > 0:
+                        return row['CAPACIDADE_KG']
+                    if row['CAPAC_CAVALO'] > 0:
+                        return row['CAPAC_CAVALO']
+                    tipo_veiculo = obter_tipo_veiculo_base(row)
+                    return capacidades_padrao_veiculo_sozinho.get(tipo_veiculo, 0)
+
+                viagens_unicas['CAPACIDADE_PESO_VIAGEM'] = viagens_unicas.apply(get_capacidade_viagem_peso, axis=1)
+
+                carga_tipo = (
+                    df_chart.groupby('CATEGORIA_VIAGEM', dropna=False)['Peso Cálculo (KG)']
+                    .sum()
+                    .reset_index(name='CARGA_KG')
+                )
+                capacidade_tipo = (
+                    viagens_unicas.groupby('CATEGORIA_VIAGEM', dropna=False)['CAPACIDADE_PESO_VIAGEM']
+                    .sum()
+                    .reset_index(name='CAPACIDADE_KG')
+                )
+                viagens_tipo = (
+                    viagens_unicas.groupby('CATEGORIA_VIAGEM', dropna=False)['VIAGEM_UNICA_ID']
+                    .nunique()
+                    .reset_index(name='TOTAL_VIAGENS')
+                )
+
+                resumo_tipo = carga_tipo.merge(capacidade_tipo, on='CATEGORIA_VIAGEM', how='outer')
+                resumo_tipo = resumo_tipo.merge(viagens_tipo, on='CATEGORIA_VIAGEM', how='left').fillna(0)
+                resumo_tipo['TIPO_VEICULO'] = resumo_tipo['CATEGORIA_VIAGEM'].fillna('INDEFINIDO').replace('', 'INDEFINIDO')
+                resumo_tipo = resumo_tipo[resumo_tipo['CARGA_KG'] > 0].copy()
+
+                if resumo_tipo.empty:
+                    return resumo_tipo
+
+                total_carga = resumo_tipo['CARGA_KG'].sum()
+                resumo_tipo['PARTICIPACAO_PERC'] = (resumo_tipo['CARGA_KG'] / total_carga * 100).round(2)
+                resumo_tipo['OCUPACAO_PERC'] = np.where(
+                    resumo_tipo['CAPACIDADE_KG'] > 0,
+                    resumo_tipo['CARGA_KG'] / resumo_tipo['CAPACIDADE_KG'] * 100,
+                    0
+                )
+
+                ordem_prioridade = {
+                    'TRUCK': 0,
+                    'BI-TRUCK': 1,
+                    'CARRETA': 2,
+                    'TOCO': 3,
+                    '3/4 - CAMINHAO PEQUE': 4,
+                    'INDEFINIDO': 98
+                }
+
+                resumo_tipo['ORDEM_TIPO'] = resumo_tipo['TIPO_VEICULO'].map(ordem_prioridade).fillna(99)
+                resumo_tipo = resumo_tipo.sort_values(['ORDEM_TIPO', 'PARTICIPACAO_PERC'], ascending=[True, False]).reset_index(drop=True)
+                resumo_tipo['TIPO_LABEL'] = resumo_tipo['TIPO_VEICULO'].replace({'3/4 - CAMINHAO PEQUE': 'TRUCK'})
+
+                paleta_cores = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#ef4444']
+                resumo_tipo['COR'] = [paleta_cores[i % len(paleta_cores)] for i in range(len(resumo_tipo))]
+                resumo_tipo['CARGA_TON'] = resumo_tipo['CARGA_KG'] / 1000
+                resumo_tipo['TOTAL_VIAGENS'] = resumo_tipo['TOTAL_VIAGENS'].astype(int)
+                return resumo_tipo
+
+            def preparar_faixas_ocupacao_viagens(df_dados):
+                if df_dados.empty:
+                    return None
+
+                df_faixas = df_dados.copy()
+
+                if 'CATEGORIA_VIAGEM' not in df_faixas.columns:
+                    df_faixas['CATEGORIA_VIAGEM'] = df_faixas.apply(definir_categoria_viagem, axis=1)
+
+                if 'VIAGEM_UNICA_ID' not in df_faixas.columns:
+                    df_faixas['VIAGEM_UNICA_ID'] = df_faixas.groupby(['PLACA_CAVALO', 'DIA_EMISSAO_STR', 'MOTORISTA']).ngroup()
+
+                df_faixas = garantir_coluna_peso_calculo(df_faixas)
+                df_faixas['Peso Cálculo (KG)'] = pd.to_numeric(df_faixas['Peso Cálculo (KG)'], errors='coerce').fillna(0)
+
+                viagens_unicas = df_faixas.drop_duplicates(subset=['VIAGEM_UNICA_ID']).copy()
+                capacidades_padrao_veiculo_sozinho = {
+                    'TRUCK': 16000,
+                    'TOCO': 10000,
+                    '3/4 - CAMINHAO PEQUE': 4500
+                }
+
+                def get_capacidade_viagem_peso(row):
+                    if pd.notna(row['PLACA_CARRETA']) and row['PLACA_CARRETA'] != '' and row['CAPACIDADE_KG'] > 0:
+                        return row['CAPACIDADE_KG']
+                    if row['CAPAC_CAVALO'] > 0:
+                        return row['CAPAC_CAVALO']
+                    tipo_veiculo = obter_tipo_veiculo_base(row)
+                    return capacidades_padrao_veiculo_sozinho.get(tipo_veiculo, 0)
+
+                def ordenar_siglas_faixa(siglas_texto):
+                    siglas_unicas = []
+                    siglas_vistas = set()
+
+                    for item in siglas_texto.fillna(''):
+                        for sigla in [parte.strip().upper() for parte in str(item).split('/') if str(parte).strip()]:
+                            if sigla not in siglas_vistas:
+                                siglas_vistas.add(sigla)
+                                siglas_unicas.append(sigla)
+
+                    return ' / '.join(siglas_unicas) if siglas_unicas else '—'
+
+                def ordenar_nomes_rotas_faixa(rotas_texto):
+                    rotas_unicas = []
+                    rotas_vistas = set()
+
+                    for item in rotas_texto.fillna(''):
+                        nome_rota = str(item).strip()
+                        nome_rota = re.sub(r'^ROTA\s+', '', nome_rota, flags=re.IGNORECASE).strip()
+
+                        if nome_rota and nome_rota not in rotas_vistas:
+                            rotas_vistas.add(nome_rota)
+                            rotas_unicas.append(nome_rota)
+
+                    return ' / '.join(rotas_unicas) if rotas_unicas else '—'
+
+                def ordenar_sigla_principal_rota_faixa(rotas_texto):
+                    rotas_unicas = []
+                    rotas_vistas = set()
+
+                    mapa_sigla_principal_rota = {
+                        "COXIM": "COX",
+                        "SÃO PAULO": "SPO",
+                        "GOIÂNIA": "GYN",
+                        "BATAGUASSU": "BAT",
+                        "RIO BRILHANTE/DOURADOS": "RBT/DOU",
+                        "SÃO GABRIEL": "SGO",
+                        "MARACAJU": "MJU",
+                        "JARDIM": "JDM",
+                        "BODOQUENA": "BDQ",
+                        "COSTA RICA": "CRC",
+                        "IVINHEMA": "IVM",
+                        "RIBAS": "ACL",
+                        "DOURADOS": "DOU",
+                        "RIO BRILHANTE": "RBT",
+                        "NOVA ANDRADINA": "NAD",
+                        "BONITO": "BTO",
+                        "AQUIDAUANA": "AQU",
+                        "PONTA PORÃ": "PPR",
+                        "TRÊS LAGOAS": "TLG",
+                        "CORUMBÁ": "COR",
+                    }
+
+                    for item in rotas_texto.fillna(''):
+                        nome_rota = str(item).strip()
+                        nome_rota = re.sub(r'^ROTA\s+', '', nome_rota, flags=re.IGNORECASE).strip()
+                        sigla_rota = mapa_sigla_principal_rota.get(nome_rota, nome_rota)
+
+                        if sigla_rota and sigla_rota not in rotas_vistas:
+                            rotas_vistas.add(sigla_rota)
+                            rotas_unicas.append(sigla_rota)
+
+                    return ' / '.join(rotas_unicas) if rotas_unicas else '—'
+
+                def obter_nome_rota_para_faixa(destinos):
+                    destinos_validos = [
+                        str(dest).strip().upper()
+                        for dest in destinos
+                        if pd.notna(dest) and str(dest).strip()
+                    ]
+                    if not destinos_validos:
+                        return '—'
+
+                    if 'obter_nome_rota_padronizado' in globals() and callable(obter_nome_rota_padronizado):
+                        try:
+                            return obter_nome_rota_padronizado(destinos_validos)
+                        except Exception:
+                            pass
+
+                    siglas_ordenadas = ordenar_destinos_geograficamente(
+                        sorted(set(destinos_validos)),
+                        ROTAS_COMPOSTAS,
+                        ORDEM_DAS_ROTAS
+                    )
+                    return f"ROTA {siglas_ordenadas}" if siglas_ordenadas != '—' else '—'
+
+                viagens_unicas['CAPACIDADE_PESO_VIAGEM'] = viagens_unicas.apply(get_capacidade_viagem_peso, axis=1)
+
+                carga_por_viagem = (
+                    df_faixas.groupby('VIAGEM_UNICA_ID', dropna=False)['Peso Cálculo (KG)']
+                    .sum()
+                    .reset_index(name='CARGA_KG')
+                )
+
+                siglas_por_viagem = (
+                    df_faixas.groupby('VIAGEM_UNICA_ID', dropna=False)['DEST_MANIF']
+                    .agg(lambda x: ordenar_destinos_geograficamente(
+                        sorted({str(dest).strip().upper() for dest in x if pd.notna(dest) and str(dest).strip()}),
+                        ROTAS_COMPOSTAS,
+                        ORDEM_DAS_ROTAS
+                    ) if any(pd.notna(dest) and str(dest).strip() for dest in x) else '—')
+                    .reset_index(name='SIGLAS_ROTA')
+                )
+
+                nomes_rotas_por_viagem = (
+                    df_faixas.groupby('VIAGEM_UNICA_ID', dropna=False)['DEST_MANIF']
+                    .agg(obter_nome_rota_para_faixa)
+                    .reset_index(name='NOMES_ROTAS')
+                )
+
+                resumo_viagens_ocup = viagens_unicas[[
+                    'VIAGEM_UNICA_ID',
+                    'CATEGORIA_VIAGEM',
+                    'CAPACIDADE_PESO_VIAGEM'
+                ]].merge(carga_por_viagem, on='VIAGEM_UNICA_ID', how='left')
+
+                resumo_viagens_ocup = resumo_viagens_ocup.merge(
+                    siglas_por_viagem,
+                    on='VIAGEM_UNICA_ID',
+                    how='left'
+                )
+
+                resumo_viagens_ocup = resumo_viagens_ocup.merge(
+                    nomes_rotas_por_viagem,
+                    on='VIAGEM_UNICA_ID',
+                    how='left'
+                )
+
+                resumo_viagens_ocup['CARGA_KG'] = pd.to_numeric(
+                    resumo_viagens_ocup['CARGA_KG'], errors='coerce'
+                ).fillna(0)
+                resumo_viagens_ocup = resumo_viagens_ocup[resumo_viagens_ocup['CAPACIDADE_PESO_VIAGEM'] > 0].copy()
+
+                if resumo_viagens_ocup.empty:
+                    return None
+
+                resumo_viagens_ocup['OCUPACAO_PERC'] = np.where(
+                    resumo_viagens_ocup['CAPACIDADE_PESO_VIAGEM'] > 0,
+                    resumo_viagens_ocup['CARGA_KG'] / resumo_viagens_ocup['CAPACIDADE_PESO_VIAGEM'] * 100,
+                    0
+                )
+
+                resumo_viagens_ocup['FAIXA_OCUPACAO'] = np.select(
+                    [
+                        resumo_viagens_ocup['OCUPACAO_PERC'] < 60,
+                        (resumo_viagens_ocup['OCUPACAO_PERC'] >= 60) & (resumo_viagens_ocup['OCUPACAO_PERC'] <= 80),
+                        resumo_viagens_ocup['OCUPACAO_PERC'] > 80
+                    ],
+                    ['baixa', 'media', 'alta'],
+                    default='baixa'
+                )
+
+                contagens = resumo_viagens_ocup['FAIXA_OCUPACAO'].value_counts()
+                siglas_faixa = (
+                    resumo_viagens_ocup.groupby('FAIXA_OCUPACAO', dropna=False)['SIGLAS_ROTA']
+                    .apply(ordenar_siglas_faixa)
+                    .to_dict()
+                )
+                nomes_faixa = (
+                    resumo_viagens_ocup.groupby('FAIXA_OCUPACAO', dropna=False)['NOMES_ROTAS']
+                    .apply(ordenar_nomes_rotas_faixa)
+                    .to_dict()
+                )
+                sigla_principal_faixa = (
+                    resumo_viagens_ocup.groupby('FAIXA_OCUPACAO', dropna=False)['NOMES_ROTAS']
+                    .apply(ordenar_sigla_principal_rota_faixa)
+                    .to_dict()
+                )
+
+                exibir_nomes_rotas = periodo_tipo in ["Dia Específico", "Mês Completo", "Período Personalizado"]
+
+                return {
+                    'baixa': int(contagens.get('baixa', 0)),
+                    'media': int(contagens.get('media', 0)),
+                    'alta': int(contagens.get('alta', 0)),
+                    'siglas_baixa': nomes_faixa.get('baixa', '—') if exibir_nomes_rotas else sigla_principal_faixa.get('baixa', '—'),
+                    'siglas_media': nomes_faixa.get('media', '—') if exibir_nomes_rotas else sigla_principal_faixa.get('media', '—'),
+                    'siglas_alta': nomes_faixa.get('alta', '—') if exibir_nomes_rotas else sigla_principal_faixa.get('alta', '—'),
+                    'total_viagens': int(resumo_viagens_ocup['VIAGEM_UNICA_ID'].nunique()),
+                    'ocupacao_media': float(resumo_viagens_ocup['OCUPACAO_PERC'].mean()),
+                }
+
+            def formatar_qtd_viagens(qtd):
+                qtd = int(qtd or 0)
+                return f"{qtd} viagem" if qtd == 1 else f"{qtd} viagens"
+
+            resumo_grafico_ocupacao = preparar_dados_grafico_ocupacao(df_para_analise)
+            resumo_faixas_ocupacao = preparar_faixas_ocupacao_viagens(df_para_analise) if selecionar_veiculo != "TODOS" else None
             st.markdown("""
                 <style>
                 .occupancy-mini-section-title {
@@ -6717,13 +6923,13 @@ with tab1:
                     display: flex;
                     align-items: center;
                     justify-content: space-between;
-                    gap: 16px;
-                    margin: 14px 0 14px 0;
-                    padding: 14px 18px;
+                    gap: 14px;
+                    margin: 10px 0 12px 0;
+                    padding: 13px 16px;
                     border-radius: 20px;
                     border: 1px solid rgba(148,163,184,0.14);
                     background: linear-gradient(135deg, rgba(7,15,30,0.96) 0%, rgba(15,23,42,0.88) 100%);
-                    box-shadow: 0 16px 34px rgba(2,6,23,0.24), inset 0 1px 0 rgba(255,255,255,0.04);
+                    box-shadow: 0 14px 28px rgba(2,6,23,0.22), inset 0 1px 0 rgba(255,255,255,0.04);
                     isolation: isolate;
                 }
                 .occupancy-mini-section-title::before {
@@ -6740,42 +6946,43 @@ with tab1:
                 .occupancy-mini-section-head {
                     display: flex;
                     align-items: center;
-                    gap: 12px;
+                    gap: 10px;
                     min-width: 0;
                     position: relative;
                     z-index: 1;
                 }
                 .occupancy-mini-section-title i {
-                    width: 38px;
-                    height: 38px;
-                    min-width: 38px;
+                    width: 36px;
+                    height: 36px;
+                    min-width: 36px;
                     display: flex;
                     align-items: center;
                     justify-content: center;
-                    border-radius: 13px;
+                    border-radius: 12px;
                     color: #ffffff;
                     background: linear-gradient(135deg, rgba(29,78,216,0.94) 0%, rgba(59,130,246,0.62) 100%);
-                    box-shadow: 0 10px 20px rgba(37,99,235,0.24);
+                    box-shadow: 0 10px 18px rgba(37,99,235,0.20);
                     position: relative;
                     z-index: 1;
+                    font-size: 0.92rem;
                 }
                 .occupancy-mini-section-title.finance i {
                     background: linear-gradient(135deg, rgba(5,150,105,0.92) 0%, rgba(16,185,129,0.62) 100%);
-                    box-shadow: 0 10px 20px rgba(16,185,129,0.20);
+                    box-shadow: 0 10px 18px rgba(16,185,129,0.18);
                 }
                 .occupancy-mini-section-title .label-wrap {
                     display: flex;
                     flex-direction: column;
-                    gap: 3px;
+                    gap: 2px;
                     min-width: 0;
                     position: relative;
                     z-index: 1;
                 }
                 .occupancy-mini-section-title .eyebrow {
                     color: #93c5fd;
-                    font-size: 0.68rem;
+                    font-size: 0.62rem;
                     font-weight: 800;
-                    letter-spacing: 1px;
+                    letter-spacing: 0.9px;
                     text-transform: uppercase;
                     line-height: 1;
                 }
@@ -6784,17 +6991,17 @@ with tab1:
                 }
                 .occupancy-mini-section-title .title {
                     color: #ffffff;
-                    font-size: 1.02rem;
+                    font-size: 1rem;
                     font-weight: 800;
                     line-height: 1.1;
-                    letter-spacing: 0.15px;
+                    letter-spacing: 0.1px;
                 }
                 .occupancy-mini-badges {
                     display: flex;
                     align-items: center;
                     justify-content: flex-end;
                     flex-wrap: wrap;
-                    gap: 12px;
+                    gap: 8px;
                     margin-left: auto;
                     position: relative;
                     z-index: 1;
@@ -6802,8 +7009,8 @@ with tab1:
                 .occupancy-mini-badge {
                     display: inline-flex;
                     align-items: center;
-                    gap: 10px;
-                    padding: 9px 15px;
+                    gap: 8px;
+                    padding: 8px 12px;
                     border-radius: 999px;
                     background: rgba(255,255,255,0.06);
                     border: 1px solid rgba(148,163,184,0.18);
@@ -6813,23 +7020,559 @@ with tab1:
                     white-space: nowrap;
                 }
                 .occupancy-mini-badge .badge-dot {
-                    width: 9px;
-                    height: 9px;
+                    width: 8px;
+                    height: 8px;
                     border-radius: 999px;
                     background: #60a5fa;
-                    box-shadow: 0 0 12px rgba(96,165,250,0.45);
+                    box-shadow: 0 0 10px rgba(96,165,250,0.45);
                     flex-shrink: 0;
                 }
                 .occupancy-mini-section-title.finance .occupancy-mini-badge .badge-dot {
                     background: #34d399;
-                    box-shadow: 0 0 12px rgba(52,211,153,0.40);
+                    box-shadow: 0 0 10px rgba(52,211,153,0.40);
                 }
                 .occupancy-mini-badge .badge-value {
                     color: #e2e8f0;
-                    font-size: 0.84rem;
+                    font-size: 0.76rem;
                     font-weight: 700;
-                    letter-spacing: 0.1px;
+                    letter-spacing: 0.08px;
                     line-height: 1;
+                }
+                .executive-badge-rail {
+                    position: relative;
+                    overflow: hidden;
+                    margin: 0 0 18px 0;
+                    padding: 9px 14px;
+                    min-height: 48px;
+                    border-radius: 18px;
+                    border: 1px solid rgba(59,130,246,0.18);
+                    background: linear-gradient(135deg, rgba(7,15,30,0.94) 0%, rgba(10,18,34,0.90) 100%);
+                    box-shadow: 0 12px 24px rgba(2,6,23,0.20), inset 0 1px 0 rgba(255,255,255,0.04);
+                    isolation: isolate;
+                }
+                .executive-badge-rail::before {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    background: linear-gradient(90deg, rgba(59,130,246,0.12) 0%, rgba(59,130,246,0.03) 55%, rgba(255,255,255,0.00) 100%);
+                    pointer-events: none;
+                    z-index: 0;
+                }
+                .executive-badge-rail.finance {
+                    border-color: rgba(16,185,129,0.18);
+                }
+                .executive-badge-rail.finance::before {
+                    background: linear-gradient(90deg, rgba(16,185,129,0.12) 0%, rgba(16,185,129,0.03) 55%, rgba(255,255,255,0.00) 100%);
+                }
+                .executive-badge-rail .occupancy-mini-badges {
+                    width: 100%;
+                    justify-content: flex-start;
+                    flex-wrap: nowrap;
+                    gap: 8px;
+                    margin-left: 0;
+                    overflow-x: auto;
+                    scrollbar-width: none;
+                    position: relative;
+                    z-index: 1;
+                }
+                .executive-badge-rail .occupancy-mini-badges::-webkit-scrollbar {
+                    display: none;
+                }
+                .executive-badge-rail .occupancy-mini-badge {
+                    padding: 7px 11px;
+                    background: rgba(255,255,255,0.05);
+                    border: 1px solid rgba(148,163,184,0.16);
+                }
+                .executive-group-shell {
+                    position: relative;
+                    height: 100%;
+                    padding: 12px 12px 14px 12px;
+                    border-radius: 26px;
+                    border: 1px solid rgba(148,163,184,0.12);
+                    background: linear-gradient(135deg, rgba(7,15,30,0.42) 0%, rgba(15,23,42,0.18) 100%);
+                    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+                    overflow: hidden;
+                }
+                .executive-group-shell::before {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    background: radial-gradient(circle at top left, rgba(59,130,246,0.10) 0%, rgba(59,130,246,0.00) 42%);
+                    pointer-events: none;
+                }
+                .executive-group-shell.finance::before {
+                    background: radial-gradient(circle at top left, rgba(16,185,129,0.10) 0%, rgba(16,185,129,0.00) 42%);
+                }
+                .executive-group-shell .occupancy-mini-section-title {
+                    margin: 0 0 10px 0;
+                }
+                .executive-group-shell .occupancy-mini-badges {
+                    gap: 6px;
+                }
+                .executive-group-shell .occupancy-mini-badge {
+                    padding: 6px 10px;
+                }
+                .finance-kpi-card.exec-kpi-compact-card {
+                    min-height: 118px !important;
+                    padding: 13px 14px 11px 14px !important;
+                    border-radius: 18px !important;
+                }
+                .finance-kpi-card.exec-kpi-compact-card .finance-kpi-header {
+                    gap: 9px;
+                }
+                .finance-kpi-card.exec-kpi-compact-card .finance-kpi-title {
+                    min-height: unset !important;
+                    font-size: 0.64rem !important;
+                    line-height: 1.16 !important;
+                    letter-spacing: 0.55px !important;
+                }
+                .finance-kpi-card.exec-kpi-compact-card .finance-kpi-icon {
+                    width: 34px;
+                    height: 34px;
+                    min-width: 34px;
+                    border-radius: 12px;
+                    font-size: 0.86rem;
+                }
+                .finance-kpi-card.exec-kpi-compact-card .finance-kpi-value {
+                    margin-top: 10px !important;
+                    font-size: 1.58rem !important;
+                    line-height: 1.04 !important;
+                    letter-spacing: -0.5px !important;
+                }
+                .finance-kpi-card.exec-kpi-compact-card .finance-kpi-divider {
+                    margin: 10px 0 8px 0 !important;
+                }
+                .finance-kpi-card.exec-kpi-compact-card .finance-kpi-footer {
+                    padding: 4px 9px !important;
+                    font-size: 0.68rem !important;
+                    gap: 6px !important;
+                }
+                .occupancy-chart-panel {
+                    position: relative;
+                    overflow: hidden;
+                    margin-top: 0;
+                    border-radius: 24px;
+                    padding: 18px 18px 16px 18px;
+                    min-height: 100%;
+                    background:
+                        radial-gradient(circle at top right, rgba(59,130,246,0.16) 0%, rgba(59,130,246,0.00) 32%),
+                        linear-gradient(135deg, rgba(9,14,29,0.98) 0%, rgba(16,24,40,0.94) 100%);
+                    border: 1px solid rgba(96,165,250,0.22);
+                    box-shadow: 0 16px 32px rgba(2,6,23,0.22), inset 0 1px 0 rgba(255,255,255,0.04);
+                }
+                .occupancy-chart-panel::before {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.00) 30%);
+                    pointer-events: none;
+                }
+                .occupancy-chart-header {
+                    position: relative;
+                    z-index: 1;
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    margin-bottom: 14px;
+                }
+                .occupancy-chart-header-icon {
+                    width: 44px;
+                    height: 44px;
+                    min-width: 44px;
+                    border-radius: 14px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: linear-gradient(135deg, rgba(29,78,216,0.92) 0%, rgba(59,130,246,0.64) 100%);
+                    color: #ffffff;
+                    font-size: 1rem;
+                    box-shadow: 0 10px 20px rgba(37,99,235,0.24);
+                }
+                .occupancy-chart-header-copy {
+                    min-width: 0;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                }
+                .occupancy-chart-header-copy .eyebrow {
+                    color: #93c5fd;
+                    font-size: 0.62rem;
+                    font-weight: 800;
+                    letter-spacing: 0.9px;
+                    text-transform: uppercase;
+                    line-height: 1;
+                }
+                .occupancy-chart-header-copy .title {
+                    color: #f8fafc;
+                    font-family: "Poppins", "Segoe UI", sans-serif;
+                    font-size: 1.06rem;
+                    font-weight: 700;
+                    line-height: 1.15;
+                }
+                .occupancy-chart-stats {
+                    position: relative;
+                    z-index: 1;
+                    display: grid;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 10px;
+                    margin-bottom: 12px;
+                }
+                .occupancy-chart-stat {
+                    padding: 11px 12px;
+                    border-radius: 16px;
+                    background: rgba(255,255,255,0.05);
+                    border: 1px solid rgba(148,163,184,0.16);
+                    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+                }
+                .occupancy-chart-stat .label {
+                    display: block;
+                    color: #94a3b8;
+                    font-size: 0.66rem;
+                    font-weight: 700;
+                    text-transform: uppercase;
+                    letter-spacing: 0.7px;
+                    line-height: 1;
+                    margin-bottom: 6px;
+                }
+                .occupancy-chart-stat .value {
+                    display: block;
+                    color: #f8fafc;
+                    font-size: 1.10rem;
+                    font-weight: 800;
+                    line-height: 1.05;
+                }
+                .occupancy-chart-caption {
+                    position: relative;
+                    z-index: 1;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 7px;
+                    margin: 4px 0 8px 0;
+                    color: #cbd5e1;
+                    font-size: 0.72rem;
+                    font-weight: 700;
+                }
+                .occupancy-chart-caption .dot {
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 999px;
+                    background: #60a5fa;
+                    box-shadow: 0 0 10px rgba(96,165,250,0.40);
+                }
+                .occupancy-chart-legend {
+                    position: relative;
+                    z-index: 1;
+                    display: grid;
+                    gap: 10px;
+                    margin-top: 8px;
+                }
+                .occupancy-chart-layout {
+                    display: grid;
+                    grid-template-columns: minmax(300px, 1.14fr) minmax(310px, 1fr);
+                    align-items: center;
+                    gap: 22px;
+                    margin-top: 10px;
+                }
+                .occupancy-chart-plot {
+                    min-width: 0;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .occupancy-chart-legend.occupancy-chart-legend-side {
+                    margin-top: 0;
+                    align-content: start;
+                    height: 100%;
+                }
+                .occupancy-chart-legend-side .occupancy-chart-legend-item {
+                    min-height: 62px;
+                }
+                .occupancy-chart-legend-item {
+                    --accent: #60a5fa;
+                    position: relative;
+                    overflow: hidden;
+                    display: grid;
+                    grid-template-columns: auto 1fr auto;
+                    align-items: center;
+                    gap: 13px;
+                    padding: 13px 14px;
+                    min-height: 70px;
+                    border-radius: 18px;
+                    background: linear-gradient(135deg, rgba(15,23,42,0.96) 0%, rgba(30,41,59,0.92) 100%);
+                    border: 1px solid rgba(148,163,184,0.16);
+                    box-shadow: 0 10px 22px rgba(2,6,23,0.18), inset 0 1px 0 rgba(255,255,255,0.04);
+                    transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+                }
+                .occupancy-chart-legend-item::before {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 16%, transparent) 0%, rgba(255,255,255,0) 58%);
+                    pointer-events: none;
+                }
+                .occupancy-chart-legend-item::after {
+                    content: "";
+                    position: absolute;
+                    left: 0;
+                    top: 0;
+                    bottom: 0;
+                    width: 3px;
+                    background: var(--accent);
+                    box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 55%, transparent);
+                    opacity: 0.95;
+                }
+                .occupancy-chart-legend-item:hover {
+                    transform: translateY(-1px);
+                    border-color: color-mix(in srgb, var(--accent) 38%, rgba(148,163,184,0.16));
+                    box-shadow: 0 14px 28px rgba(2,6,23,0.24), inset 0 1px 0 rgba(255,255,255,0.05);
+                }
+                .occupancy-chart-legend-dot {
+                    position: relative;
+                    z-index: 1;
+                    width: 12px;
+                    height: 12px;
+                    border-radius: 999px;
+                    flex-shrink: 0;
+                    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent), 0 0 12px color-mix(in srgb, var(--accent) 38%, transparent);
+                }
+                .occupancy-chart-legend-main {
+                    position: relative;
+                    z-index: 1;
+                    min-width: 0;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 3px;
+                }
+                .occupancy-chart-legend-main .name {
+                    color: #f8fafc;
+                    font-size: 0.88rem;
+                    font-weight: 800;
+                    line-height: 1.05;
+                    letter-spacing: 0.15px;
+                }
+                .occupancy-chart-legend-main .meta {
+                    color: #a7b4c7;
+                    font-size: 0.72rem;
+                    font-weight: 700;
+                    line-height: 1.2;
+                }
+                .occupancy-chart-legend-value {
+                    position: relative;
+                    z-index: 1;
+                    color: #f8fafc;
+                    font-size: 0.80rem;
+                    font-weight: 800;
+                    text-align: right;
+                    white-space: nowrap;
+                    padding: 5px 9px;
+                    border-radius: 999px;
+                    background: rgba(255,255,255,0.07);
+                    border: 1px solid rgba(255,255,255,0.10);
+                    box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+                }
+                .occupancy-range-panel {
+                    margin-top: 12px;
+                    padding: 14px 14px 13px 14px;
+                    border-radius: 20px;
+                    background:
+                        radial-gradient(circle at top right, rgba(59,130,246,0.16) 0%, rgba(59,130,246,0.00) 32%),
+                        linear-gradient(135deg, rgba(9,14,29,0.98) 0%, rgba(16,24,40,0.94) 100%);
+                    border: 1px solid rgba(96,165,250,0.18);
+                    box-shadow: 0 14px 28px rgba(2,6,23,0.22), inset 0 1px 0 rgba(255,255,255,0.04);
+                }
+                .occupancy-range-header {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                    margin-bottom: 10px;
+                }
+                .occupancy-range-header .eyebrow {
+                    color: #93c5fd;
+                    font-size: 0.62rem;
+                    font-weight: 800;
+                    letter-spacing: 0.9px;
+                    text-transform: uppercase;
+                    line-height: 1;
+                }
+                .occupancy-range-header .title {
+                    color: #f8fafc;
+                    font-family: "Poppins", "Segoe UI", sans-serif;
+                    font-size: 0.94rem;
+                    font-weight: 700;
+                    line-height: 1.2;
+                }
+                .occupancy-range-list {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 8px;
+                }
+                .occupancy-range-item {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    gap: 12px;
+                    padding: 10px 11px;
+                    border-radius: 16px;
+                    background: linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%);
+                    border: 1px solid rgba(255,255,255,0.08);
+                    box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+                }
+                .occupancy-range-item.low {
+                    border-left: 3px solid #ef4444;
+                }
+                .occupancy-range-item.mid {
+                    border-left: 3px solid #f59e0b;
+                }
+                .occupancy-range-item.high {
+                    border-left: 3px solid #22c55e;
+                }
+                .occupancy-range-copy {
+                    display: flex;
+                    align-items: flex-start;
+                    gap: 9px;
+                    min-width: 0;
+                }
+                .occupancy-range-dot {
+                    width: 10px;
+                    height: 10px;
+                    min-width: 10px;
+                    border-radius: 999px;
+                    margin-top: 4px;
+                    box-shadow: 0 0 12px currentColor;
+                }
+                .occupancy-range-item.low .occupancy-range-dot {
+                    color: #ef4444;
+                    background: #ef4444;
+                }
+                .occupancy-range-item.mid .occupancy-range-dot {
+                    color: #f59e0b;
+                    background: #f59e0b;
+                }
+                .occupancy-range-item.high .occupancy-range-dot {
+                    color: #22c55e;
+                    background: #22c55e;
+                }
+                .occupancy-range-text {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 2px;
+                    min-width: 0;
+                }
+                .occupancy-range-label {
+                    color: #f8fafc;
+                    font-size: 0.78rem;
+                    font-weight: 800;
+                    line-height: 1.1;
+                }
+                .occupancy-range-meta {
+                    color: #94a3b8;
+                    font-size: 0.67rem;
+                    font-weight: 700;
+                    line-height: 1.25;
+                    white-space: normal;
+                    overflow-wrap: anywhere;
+                }
+                .occupancy-range-badge {
+                    color: #f8fafc;
+                    font-size: 0.72rem;
+                    font-weight: 800;
+                    white-space: nowrap;
+                    padding: 6px 10px;
+                    border-radius: 999px;
+                    background: rgba(255,255,255,0.08);
+                    border: 1px solid rgba(255,255,255,0.10);
+                }
+                .occupancy-range-footer {
+                    margin-top: 10px;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    flex-wrap: wrap;
+                }
+                .occupancy-range-chip {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 7px;
+                    padding: 6px 10px;
+                    border-radius: 999px;
+                    background: rgba(255,255,255,0.06);
+                    border: 1px solid rgba(255,255,255,0.10);
+                    color: #dbeafe;
+                    font-size: 0.71rem;
+                    font-weight: 800;
+                }
+                .occupancy-chart-slot {
+                    position: relative;
+                    overflow: hidden;
+                    min-height: 278px;
+                    height: 100%;
+                    margin-top: 10px;
+                    border-radius: 22px;
+                    padding: 18px 18px;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    text-align: center;
+                    gap: 12px;
+                    background:
+                        radial-gradient(circle at top right, rgba(59,130,246,0.18) 0%, rgba(59,130,246,0.00) 30%),
+                        linear-gradient(135deg, rgba(9,14,29,0.98) 0%, rgba(16,24,40,0.94) 100%);
+                    border: 1px dashed rgba(96,165,250,0.34);
+                    box-shadow: 0 16px 32px rgba(2,6,23,0.22), inset 0 1px 0 rgba(255,255,255,0.04);
+                }
+                .occupancy-chart-slot::before {
+                    content: "";
+                    position: absolute;
+                    inset: 0;
+                    background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.00) 32%);
+                    pointer-events: none;
+                }
+                .occupancy-chart-slot-icon {
+                    width: 58px;
+                    height: 58px;
+                    border-radius: 18px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    background: linear-gradient(135deg, rgba(29,78,216,0.92) 0%, rgba(59,130,246,0.64) 100%);
+                    color: #ffffff;
+                    font-size: 1.35rem;
+                    box-shadow: 0 12px 24px rgba(37,99,235,0.26);
+                    position: relative;
+                    z-index: 1;
+                }
+                .occupancy-chart-slot-title {
+                    position: relative;
+                    z-index: 1;
+                    color: #f8fafc;
+                    font-family: "Poppins", "Segoe UI", sans-serif;
+                    font-size: 1.04rem;
+                    font-weight: 700;
+                    line-height: 1.2;
+                }
+                .occupancy-chart-slot-subtitle {
+                    position: relative;
+                    z-index: 1;
+                    color: #94a3b8;
+                    font-size: 0.82rem;
+                    line-height: 1.45;
+                    max-width: 270px;
+                }
+                .occupancy-chart-slot-chip {
+                    position: relative;
+                    z-index: 1;
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 8px;
+                    padding: 7px 12px;
+                    border-radius: 999px;
+                    background: rgba(255,255,255,0.06);
+                    border: 1px solid rgba(148,163,184,0.18);
+                    color: #e2e8f0;
+                    font-size: 0.73rem;
+                    font-weight: 700;
                 }
                 html[data-theme="light"] .occupancy-mini-section-title {
                     background: linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.96) 100%) !important;
@@ -6853,6 +7596,113 @@ with tab1:
                 html[data-theme="light"] .occupancy-mini-badge .badge-value {
                     color: #334155 !important;
                 }
+                html[data-theme="light"] .executive-badge-rail {
+                    background: linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.96) 100%) !important;
+                    border: 1px solid rgba(59,130,246,0.16) !important;
+                    box-shadow: 0 12px 24px rgba(15,23,42,0.06) !important;
+                }
+                html[data-theme="light"] .executive-badge-rail.finance {
+                    border-color: rgba(16,185,129,0.16) !important;
+                }
+                html[data-theme="light"] .executive-group-shell {
+                    background: linear-gradient(135deg, rgba(255,255,255,0.88) 0%, rgba(248,250,252,0.76) 100%) !important;
+                    border: 1px solid rgba(148,163,184,0.18) !important;
+                    box-shadow: 0 12px 24px rgba(15,23,42,0.05) !important;
+                }
+                html[data-theme="light"] .occupancy-chart-panel {
+                    background:
+                        radial-gradient(circle at top right, rgba(59,130,246,0.12) 0%, rgba(59,130,246,0.00) 30%),
+                        linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.96) 100%) !important;
+                    border: 1px solid rgba(59,130,246,0.18) !important;
+                    box-shadow: 0 14px 28px rgba(15,23,42,0.08) !important;
+                }
+                html[data-theme="light"] .occupancy-chart-header-copy .eyebrow {
+                    color: #2563eb !important;
+                }
+                html[data-theme="light"] .occupancy-chart-header-copy .title,
+                html[data-theme="light"] .occupancy-chart-stat .value,
+                html[data-theme="light"] .occupancy-chart-legend-main .name {
+                    color: #0f172a !important;
+                }
+                html[data-theme="light"] .occupancy-chart-stat {
+                    background: rgba(255,255,255,0.78) !important;
+                    border: 1px solid rgba(148,163,184,0.22) !important;
+                    box-shadow: inset 0 1px 0 rgba(255,255,255,0.65) !important;
+                }
+                html[data-theme="light"] .occupancy-chart-legend-item {
+                    background: linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.94) 100%) !important;
+                    border: 1px solid rgba(148,163,184,0.22) !important;
+                    box-shadow: 0 10px 24px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.7) !important;
+                }
+                html[data-theme="light"] .occupancy-chart-stat .label,
+                html[data-theme="light"] .occupancy-chart-caption,
+                html[data-theme="light"] .occupancy-chart-legend-main .meta {
+                    color: #475569 !important;
+                }
+                html[data-theme="light"] .occupancy-chart-legend-value {
+                    color: #334155 !important;
+                    background: rgba(255,255,255,0.88) !important;
+                    border: 1px solid rgba(148,163,184,0.24) !important;
+                    box-shadow: inset 0 1px 0 rgba(255,255,255,0.7) !important;
+                }
+                html[data-theme="light"] .occupancy-range-panel {
+                    background:
+                        radial-gradient(circle at top right, rgba(59,130,246,0.12) 0%, rgba(59,130,246,0.00) 32%),
+                        linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.96) 100%) !important;
+                    border: 1px solid rgba(59,130,246,0.16) !important;
+                    box-shadow: 0 14px 28px rgba(15,23,42,0.08) !important;
+                }
+                html[data-theme="light"] .occupancy-range-header .eyebrow {
+                    color: #2563eb !important;
+                }
+                html[data-theme="light"] .occupancy-range-header .title,
+                html[data-theme="light"] .occupancy-range-label,
+                html[data-theme="light"] .occupancy-range-badge {
+                    color: #0f172a !important;
+                }
+                html[data-theme="light"] .occupancy-range-meta {
+                    color: #475569 !important;
+                }
+                html[data-theme="light"] .occupancy-range-item {
+                    background: rgba(255,255,255,0.82) !important;
+                    border: 1px solid rgba(148,163,184,0.22) !important;
+                    box-shadow: inset 0 1px 0 rgba(255,255,255,0.72) !important;
+                }
+                html[data-theme="light"] .occupancy-range-badge,
+                html[data-theme="light"] .occupancy-range-chip {
+                    background: rgba(255,255,255,0.86) !important;
+                    border: 1px solid rgba(148,163,184,0.24) !important;
+                }
+                html[data-theme="light"] .occupancy-range-chip {
+                    color: #334155 !important;
+                }
+                html[data-theme="light"] .occupancy-chart-slot {
+                    background:
+                        radial-gradient(circle at top right, rgba(59,130,246,0.12) 0%, rgba(59,130,246,0.00) 30%),
+                        linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(241,245,249,0.96) 100%) !important;
+                    border: 1px dashed rgba(59,130,246,0.24) !important;
+                    box-shadow: 0 14px 28px rgba(15,23,42,0.08) !important;
+                }
+                @media (max-width: 1100px) {
+                    .occupancy-chart-layout {
+                        grid-template-columns: 1fr;
+                        align-items: start;
+                    }
+                    .occupancy-chart-legend.occupancy-chart-legend-side {
+                        margin-top: 10px;
+                    }
+                }
+                html[data-theme="light"] .occupancy-chart-slot-title {
+                    color: #0f172a !important;
+                }
+                html[data-theme="light"] .occupancy-chart-slot-subtitle,
+                html[data-theme="light"] .occupancy-chart-slot-chip {
+                    color: #475569 !important;
+                }
+                html[data-theme="light"] .occupancy-chart-slot-chip {
+                    background: rgba(255,255,255,0.78) !important;
+                    border: 1px solid rgba(148,163,184,0.26) !important;
+                }
                 @media (max-width: 1320px) {
                     .occupancy-mini-section-title {
                         align-items: flex-start;
@@ -6863,123 +7713,292 @@ with tab1:
                         justify-content: flex-start;
                         margin-left: 0;
                     }
+                    .executive-badge-rail .occupancy-mini-badges {
+                        flex-wrap: wrap;
+                        overflow-x: visible;
+                    }
+                    .occupancy-chart-slot {
+                        min-height: 244px;
+                    }
                 }
                 </style>
             """, unsafe_allow_html=True)
 
-            col_ind_ops, col_ind_fin = st.columns(2, gap="medium")
+            cards_area, chart_area = st.columns([1.92, 1.08], gap="large")
 
-            with col_ind_ops:
-                st.markdown(f"""
-                    <div class="occupancy-mini-section-title">
-                        <div class="occupancy-mini-section-head">
-                            <i class="fa-solid fa-gears"></i>
-                            <div class="label-wrap">
-                                <span class="eyebrow">Indicadores executivos</span>
-                                <span class="title">Indicadores Operacionais</span>
+            with cards_area:
+                col_ind_ops, col_ind_fin = st.columns(2, gap="medium")
+
+                with col_ind_ops:
+                    st.markdown(f"""
+                        <div class="executive-badge-rail ops">
+                            <div class="occupancy-mini-badges">
+                                <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_ops_viagens}</span></span>
+                                <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_ops_distancia}</span></span>
                             </div>
                         </div>
-                        <div class="occupancy-mini-badges">
-                            <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_ops_viagens}</span></span>
-                            <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_ops_peso}</span></span>
-                            <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_ops_ocup}</span></span>
-                        </div>
-                    </div>
-                """, unsafe_allow_html=True)
-                op1, op2 = st.columns(2, gap="medium")
-                with op1:
-                    render_overview_kpi_card(
-                        titulo="QTD. CTRC",
-                        valor=formatar_numero(total_qtd_ctrc_ind),
-                        icone="fa-file-lines",
-                        rodape="Documentos emitidos",
-                        classe="overview-blue"
-                    )
-                with op2:
-                    render_overview_kpi_card(
-                        titulo="Volumes",
-                        valor=formatar_numero(total_volumes_ind),
-                        icone="fa-boxes-stacked",
-                        rodape="Volumes movimentados",
-                        classe="overview-blue"
-                    )
-
-                st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
-
-                op3, op4 = st.columns(2, gap="medium")
-                with op3:
-                    render_overview_kpi_card(
-                        titulo="Peso Cálculo (KG)",
-                        valor=f"{formatar_numero(total_peso_ind)} KG",
-                        icone="fa-weight-hanging",
-                        rodape="Peso de cálculo",
-                        classe="overview-blue"
-                    )
-                with op4:
-                    render_overview_kpi_card(
-                        titulo="Cubagem Total (M³)",
-                        valor=f"{formatar_numero(total_cubagem_ind, 3)} M³",
-                        icone="fa-cubes-stacked",
-                        rodape="Cubagem movimentada",
-                        classe="overview-blue"
-                    )
-
-            with col_ind_fin:
-                st.markdown(f"""
-                    <div class="occupancy-mini-section-title finance">
-                        <div class="occupancy-mini-section-head">
-                            <i class="fa-solid fa-sack-dollar"></i>
-                            <div class="label-wrap">
-                                <span class="eyebrow">Indicadores executivos</span>
-                                <span class="title">Indicadores Financeiros</span>
+                        <div class="executive-group-shell ops">
+                        <div class="occupancy-mini-section-title">
+                            <div class="occupancy-mini-section-head">
+                                <i class="fa-solid fa-gears"></i>
+                                <div class="label-wrap">
+                                    <span class="eyebrow">Indicadores executivos</span>
+                                    <span class="title">Indicadores Operacionais</span>
+                                </div>
                             </div>
                         </div>
-                        <div class="occupancy-mini-badges">
-                            <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_fin_ctrb}</span></span>
-                            <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_fin_frete}</span></span>
-                            <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_fin_icms}</span></span>
+                    """, unsafe_allow_html=True)
+                    op1, op2 = st.columns(2, gap="small")
+                    with op1:
+                        render_overview_kpi_card(
+                            titulo="QTD. CTRC",
+                            valor=formatar_numero(total_qtd_ctrc_ind),
+                            icone="fa-file-lines",
+                            rodape="Documentos emitidos",
+                            classe="overview-blue",
+                            extra_classes="exec-kpi-compact-card"
+                        )
+                    with op2:
+                        render_overview_kpi_card(
+                            titulo="Volumes",
+                            valor=formatar_numero(total_volumes_ind),
+                            icone="fa-boxes-stacked",
+                            rodape="Volumes movimentados",
+                            classe="overview-blue",
+                            extra_classes="exec-kpi-compact-card"
+                        )
+
+                    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+
+                    op3, op4 = st.columns(2, gap="small")
+                    with op3:
+                        render_overview_kpi_card(
+                            titulo="Peso Cálculo (KG)",
+                            valor=f"{formatar_numero(total_peso_ind)} KG",
+                            icone="fa-weight-hanging",
+                            rodape="Peso de cálculo",
+                            classe="overview-blue",
+                            extra_classes="exec-kpi-compact-card"
+                        )
+                    with op4:
+                        render_overview_kpi_card(
+                            titulo="Cubagem Total (M³)",
+                            valor=f"{formatar_numero(total_cubagem_ind, 3)} M³",
+                            icone="fa-cubes-stacked",
+                            rodape="Cubagem movimentada",
+                            classe="overview-blue",
+                            extra_classes="exec-kpi-compact-card"
+                        )
+                    st.markdown('</div>', unsafe_allow_html=True)
+
+                with col_ind_fin:
+                    st.markdown(f"""
+                        <div class="executive-badge-rail finance">
+                            <div class="occupancy-mini-badges">
+                                <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_fin_frete}</span></span>
+                                <span class="occupancy-mini-badge"><span class="badge-dot"></span><span class="badge-value">{badge_fin_custo_km}</span></span>
+                            </div>
                         </div>
-                    </div>
-                """, unsafe_allow_html=True)
-                fin1, fin2 = st.columns(2, gap="medium")
-                with fin1:
-                    render_overview_kpi_card(
-                        titulo="CTRB Total (R$)",
-                        valor=formatar_moeda(total_ctrb_ind),
-                        icone="fa-file-invoice-dollar",
-                        rodape="Custo total do período",
-                        classe="overview-emerald"
-                    )
-                with fin2:
-                    render_overview_kpi_card(
-                        titulo="Frete Total (R$)",
-                        valor=formatar_moeda(total_frete_ind),
-                        icone="fa-money-bill-wave",
-                        rodape="Receita do período",
-                        classe="overview-emerald"
-                    )
+                        <div class="executive-group-shell finance">
+                        <div class="occupancy-mini-section-title finance">
+                            <div class="occupancy-mini-section-head">
+                                <i class="fa-solid fa-sack-dollar"></i>
+                                <div class="label-wrap">
+                                    <span class="eyebrow">Indicadores executivos</span>
+                                    <span class="title">Indicadores Financeiros</span>
+                                </div>
+                            </div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    fin1, fin2 = st.columns(2, gap="small")
+                    with fin1:
+                        render_overview_kpi_card(
+                            titulo="CTRB Total (R$)",
+                            valor=formatar_moeda(total_ctrb_ind),
+                            icone="fa-file-invoice-dollar",
+                            rodape="Custo total do período",
+                            classe="overview-emerald",
+                            extra_classes="exec-kpi-compact-card"
+                        )
+                    with fin2:
+                        render_overview_kpi_card(
+                            titulo="Frete Total (R$)",
+                            valor=formatar_moeda(total_frete_ind),
+                            icone="fa-money-bill-wave",
+                            rodape="Receita do período",
+                            classe="overview-emerald",
+                            extra_classes="exec-kpi-compact-card"
+                        )
 
-                st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+                    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
-                fin3, fin4 = st.columns(2, gap="medium")
-                with fin3:
-                    render_overview_kpi_card(
-                        titulo="ICMS (R$)",
-                        valor=formatar_moeda(total_icms_ind),
-                        icone="fa-receipt",
-                        rodape="Tributação do período",
-                        classe="overview-emerald"
-                    )
-                with fin4:
-                    render_overview_kpi_card(
-                        titulo="Valor de Mercadoria (R$)",
-                        valor=formatar_moeda(total_mercadoria_ind),
-                        icone="fa-box-open",
-                        rodape="Valor total transportado",
-                        classe="overview-emerald"
-                    )
+                    fin3, fin4 = st.columns(2, gap="small")
+                    with fin3:
+                        render_overview_kpi_card(
+                            titulo="ICMS (R$)",
+                            valor=formatar_moeda(total_icms_ind),
+                            icone="fa-receipt",
+                            rodape="Tributação do período",
+                            classe="overview-emerald",
+                            extra_classes="exec-kpi-compact-card"
+                        )
+                    with fin4:
+                        render_overview_kpi_card(
+                            titulo="Valor de Mercadoria (R$)",
+                            valor=formatar_moeda(total_mercadoria_ind),
+                            icone="fa-box-open",
+                            rodape="Valor total transportado",
+                            classe="overview-emerald",
+                            extra_classes="exec-kpi-compact-card"
+                        )
+                    st.markdown('</div>', unsafe_allow_html=True)
 
-            st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+            with chart_area:
+                if not resumo_grafico_ocupacao.empty:
+                    ordem_legenda = resumo_grafico_ocupacao['TIPO_LABEL'].tolist()
+                    cores_legenda = resumo_grafico_ocupacao['COR'].tolist()
+                    carga_total_grafico = resumo_grafico_ocupacao['CARGA_KG'].sum()
+                    capacidade_total_grafico = resumo_grafico_ocupacao['CAPACIDADE_KG'].sum()
+                    ocupacao_media_grafico = (carga_total_grafico / capacidade_total_grafico * 100) if capacidade_total_grafico > 0 else 0
+
+                    st.markdown(f"""
+                        <div class="occupancy-chart-panel">
+                            <div class="occupancy-chart-header">
+                                <div class="occupancy-chart-header-icon"><i class="fa-solid fa-chart-pie"></i></div>
+                                <div class="occupancy-chart-header-copy">
+                                    <span class="title">Ocupação de carga por tipo de veículo</span>
+                                </div>
+                            </div>
+                            <div class="occupancy-chart-stats">
+                                <div class="occupancy-chart-stat">
+                                    <span class="label">Ocupação média</span>
+                                    <span class="value">{formatar_percentual(ocupacao_media_grafico)}</span>
+                                </div>
+                                <div class="occupancy-chart-stat">
+                                    <span class="label">Carga total</span>
+                                    <span class="value">{formatar_numero(carga_total_grafico / 1000, 1)} t</span>
+                                </div>
+                            </div>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+                    chart_ocupacao_tipo = alt.Chart(resumo_grafico_ocupacao).mark_arc(
+                        innerRadius=82,
+                        outerRadius=124,
+                        cornerRadius=12,
+                        stroke='#0f172a',
+                        strokeWidth=1.8
+                    ).encode(
+                        theta=alt.Theta('CARGA_KG:Q'),
+                        color=alt.Color(
+                            'TIPO_LABEL:N',
+                            scale=alt.Scale(domain=ordem_legenda, range=cores_legenda),
+                            legend=None
+                        ),
+                        order=alt.Order('ORDEM_TIPO:Q', sort='ascending'),
+                        tooltip=[
+                            alt.Tooltip('TIPO_LABEL:N', title='Tipo'),
+                            alt.Tooltip('PARTICIPACAO_PERC:Q', title='Participação', format='.1f'),
+                            alt.Tooltip('OCUPACAO_PERC:Q', title='Ocupação', format='.1f'),
+                            alt.Tooltip('CARGA_KG:Q', title='Carga (kg)', format=',.0f'),
+                            alt.Tooltip('TOTAL_VIAGENS:Q', title='Viagens')
+                        ]
+                    ).properties(height=300)
+
+                    legenda_itens = []
+                    for _, row in resumo_grafico_ocupacao.iterrows():
+                        legenda_itens.append(
+                            (
+                                f"<div class='occupancy-chart-legend-item' style='--accent: {row['COR']};'>"
+                                f"<span class='occupancy-chart-legend-dot' style='background: {row['COR']};'></span>"
+                                f"<div class='occupancy-chart-legend-main'>"
+                                f"<span class='name'>{row['TIPO_LABEL']}</span>"
+                                f"<span class='meta'>{formatar_percentual(row['PARTICIPACAO_PERC'])} da carga • {formatar_percentual(row['OCUPACAO_PERC'])} ocupação</span>"
+                                f"</div>"
+                                f"<span class='occupancy-chart-legend-value'>{formatar_numero(row['CARGA_TON'], 1)} t</span>"
+                                f"</div>"
+                            )
+                        )
+
+                    legenda_html = ''.join(legenda_itens).strip()
+
+                    if selecionar_veiculo == "TODOS":
+                        st.markdown("<div class='occupancy-chart-layout'>", unsafe_allow_html=True)
+                        graf_col, leg_col = st.columns([1.22, 0.98], gap="medium")
+
+                        with graf_col:
+                            st.markdown("<div class='occupancy-chart-plot'>", unsafe_allow_html=True)
+                            st.altair_chart(
+                                chart_ocupacao_tipo.configure_view(stroke=None),
+                                use_container_width=True
+                            )
+                            st.markdown("</div>", unsafe_allow_html=True)
+
+                        with leg_col:
+                            st.markdown(
+                                f"<div class='occupancy-chart-legend occupancy-chart-legend-side'>{legenda_html}</div>",
+                                unsafe_allow_html=True
+                            )
+
+                        st.markdown("</div>", unsafe_allow_html=True)
+
+                    elif resumo_faixas_ocupacao and resumo_faixas_ocupacao.get('total_viagens', 0) > 0:
+                        insight_html = f"""
+                            <div class="occupancy-range-panel">
+                                <div class="occupancy-range-header">
+                                    <span class="eyebrow">{selecionar_veiculo} em foco</span>
+                                    <span class="title">Distribuição por faixa de ocupação</span>
+                                </div>
+                                <div class="occupancy-range-list">
+                                    <div class="occupancy-range-item low">
+                                        <div class="occupancy-range-copy">
+                                            <span class="occupancy-range-dot"></span>
+                                            <div class="occupancy-range-text">
+                                                <span class="occupancy-range-label">Baixa ocupação</span>
+                                                <span class="occupancy-range-meta">{resumo_faixas_ocupacao['siglas_baixa']}</span>
+                                            </div>
+                                        </div>
+                                        <span class="occupancy-range-badge">{formatar_qtd_viagens(resumo_faixas_ocupacao['baixa'])}</span>
+                                    </div>
+                                    <div class="occupancy-range-item mid">
+                                        <div class="occupancy-range-copy">
+                                            <span class="occupancy-range-dot"></span>
+                                            <div class="occupancy-range-text">
+                                                <span class="occupancy-range-label">Faixa média</span>
+                                                <span class="occupancy-range-meta">{resumo_faixas_ocupacao['siglas_media']}</span>
+                                            </div>
+                                        </div>
+                                        <span class="occupancy-range-badge">{formatar_qtd_viagens(resumo_faixas_ocupacao['media'])}</span>
+                                    </div>
+                                    <div class="occupancy-range-item high">
+                                        <div class="occupancy-range-copy">
+                                            <span class="occupancy-range-dot"></span>
+                                            <div class="occupancy-range-text">
+                                                <span class="occupancy-range-label">Alta ocupação</span>
+                                                <span class="occupancy-range-meta">{resumo_faixas_ocupacao['siglas_alta']}</span>
+                                            </div>
+                                        </div>
+                                        <span class="occupancy-range-badge">{formatar_qtd_viagens(resumo_faixas_ocupacao['alta'])}</span>
+                                    </div>
+                                </div>
+                                <div class="occupancy-range-footer">
+                                    <span class="occupancy-range-chip"><i class="fa-solid fa-road"></i><span>Base: {formatar_qtd_viagens(resumo_faixas_ocupacao['total_viagens'])}</span></span>
+                                    <span class="occupancy-range-chip"><i class="fa-solid fa-chart-line"></i><span>Média: {formatar_percentual(resumo_faixas_ocupacao['ocupacao_media'])}</span></span>
+                                </div>
+                            </div>
+                        """
+                        st.markdown(insight_html, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                        <div class="occupancy-chart-slot">
+                            <div class="occupancy-chart-slot-icon"><i class="fa-solid fa-chart-pie"></i></div>
+                            <div class="occupancy-chart-slot-title">Análise de Ocupação de Carga</div>
+                            <div class="occupancy-chart-slot-subtitle">Não há dados suficientes para montar o gráfico de pizza por tipo de veículo com os filtros atuais.</div>
+                            <div class="occupancy-chart-slot-chip"><i class="fa-solid fa-filter-circle-xmark"></i><span>Ajuste os filtros</span></div>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+            st.markdown("<div style='height: 6px;'></div>", unsafe_allow_html=True)
 
             st.markdown('<hr style="border: 1px solid #333; margin: 20px 0;">', unsafe_allow_html=True)
             
@@ -7142,7 +8161,7 @@ with tab1:
 
             def calcular_distancia_viagem(row):
                 custo_km_por_tipo = {'TOCO': 3.50, 'TRUCK': 4.50, 'CAVALO': 6.75, 'CARRETA': 6.75}
-                tipo_veiculo = str(row.get('TIPO_CAVALO', 'PADRAO')).upper()
+                tipo_veiculo = obter_tipo_veiculo_base(row) or 'PADRAO'
                 valor_km = custo_km_por_tipo.get(tipo_veiculo, 0)
                 custo_viagem = row['Custo (CTRB/OS)']
                 if valor_km > 0 and custo_viagem > 0:
@@ -7519,7 +8538,7 @@ with tab3:
                 'TOCO': {'peso_kg': 10000, 'volume_m3': 55}, 'TRUCK': {'peso_kg': 16000, 'volume_m3': 75},
                 'CAVALO': {'peso_kg': 25000, 'volume_m3': 110}, 'PADRAO': {'peso_kg': 25000, 'volume_m3': 80}
             }
-            df_viagens['CAPACIDADE_PESO'] = df_viagens['TIPO_CAVALO'].map(lambda x: capacidades.get(str(x).upper(), capacidades['PADRAO'])['peso_kg'])
+            df_viagens['CAPACIDADE_PESO'] = df_viagens.get('TIPO_CAVALO_ORIGINAL', df_viagens['TIPO_CAVALO']).map(lambda x: capacidades.get(str(x).upper(), capacidades['PADRAO'])['peso_kg'])
 
             # Agrupa por viagem para obter os valores corretos para os cálculos
             resumo_por_viagem = df_viagens.groupby('VIAGEM_ID').agg(
@@ -7888,7 +8907,7 @@ with tab4:
             'TOCO': {'peso_kg': 10000, 'volume_m3': 55}, 'TRUCK': {'peso_kg': 16000, 'volume_m3': 75},
             'CAVALO': {'peso_kg': 25000, 'volume_m3': 110}, 'PADRAO': {'peso_kg': 25000, 'volume_m3': 80}
         }
-        df_aux['CAPACIDADE_PESO'] = df_aux['TIPO_CAVALO'].map(lambda x: capacidades.get(str(x).upper(), capacidades['PADRAO'])['peso_kg'])
+        df_aux['CAPACIDADE_PESO'] = df_aux.get('TIPO_CAVALO_ORIGINAL', df_aux['TIPO_CAVALO']).map(lambda x: capacidades.get(str(x).upper(), capacidades['PADRAO'])['peso_kg'])
 
         # Mantém a mesma regra de custo de transferência usada no painel geral:
         # usa CTRB ou OS por viagem e divide por 2 nas rotas GYN/SPO.
@@ -9256,7 +10275,7 @@ with tab5:
                 viagens_unicas = df_dados.drop_duplicates(subset=['PLACA_CAVALO', 'DIA_EMISSAO_STR', 'MOTORISTA']).copy()
 
                 def get_capacidade_viagem_peso(row):
-                    if row.get('TIPO_CAVALO') == 'CAVALO':
+                    if obter_tipo_veiculo_base(row) == 'CAVALO':
                         return row.get('CAPACIDADE_KG', 0)
                     return row.get('CAPAC_CAVALO', 0)
 
@@ -9265,7 +10284,7 @@ with tab5:
                 dados['total_peso'] = somar_peso_calculo(df_dados)
 
                 capacidades_volume_por_tipo = {'TRUCK': 75, 'CAVALO': 110, 'TOCO': 55, 'PADRAO': 80}
-                viagens_unicas['CAP_VOL_VIAGEM'] = viagens_unicas['TIPO_CAVALO'].map(capacidades_volume_por_tipo).fillna(capacidades_volume_por_tipo['PADRAO'])
+                viagens_unicas['CAP_VOL_VIAGEM'] = viagens_unicas.get('TIPO_CAVALO_ORIGINAL', viagens_unicas['TIPO_CAVALO']).map(capacidades_volume_por_tipo).fillna(capacidades_volume_por_tipo['PADRAO'])
                 dados['cap_total_volume'] = viagens_unicas['CAP_VOL_VIAGEM'].sum()
                 dados['total_volume'] = df_dados['M3'].sum()
 
@@ -10280,7 +11299,7 @@ with tab5:
                         return custo_base / 2 if any(dest in str(row.get('DEST_MANIF', '')).upper() for dest in ['GYN', 'SPO']) else custo_base
 
                     def calcular_distancia_viagem(row):
-                        tipo_veiculo = str(row.get('TIPO_CAVALO', 'PADRAO')).upper()
+                        tipo_veiculo = obter_tipo_veiculo_base(row) or 'PADRAO'
                         valor_km = custo_km_por_tipo.get(tipo_veiculo, 0)
                         custo_viagem = row['Custo (CTRB/OS)']
                         return custo_viagem / valor_km if valor_km > 0 and custo_viagem > 0 else 0.0
