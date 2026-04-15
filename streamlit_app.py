@@ -8081,11 +8081,19 @@ with tab1:
                 return '' # Cor padrão
 
             # 3. Aplica a função de estilo diretamente na coluna desejada
-            #    O método .style.applymap() passa o valor de cada célula para a função.
-            styled_df = df_para_exibir_ordenado.style.applymap(
-                colorir_celula_ctrb,
-                subset=['CTRB/Frete (%)']
-            )
+            #    Compatível com versões diferentes do pandas/styler.
+            styler = df_para_exibir_ordenado.style
+
+            if hasattr(styler, "map"):
+                styled_df = styler.map(
+                    colorir_celula_ctrb,
+                    subset=['CTRB/Frete (%)']
+                )
+            else:
+                styled_df = styler.applymap(
+                    colorir_celula_ctrb,
+                    subset=['CTRB/Frete (%)']
+                )
 
             # 4. Exibe o DataFrame estilizado
             st.dataframe(styled_df, use_container_width=True, hide_index=True)
