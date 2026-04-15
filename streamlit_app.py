@@ -3847,13 +3847,25 @@ with tab1:
 
         kpi_f1, kpi_f2, kpi_f3, kpi_f4, kpi_f5 = st.columns(5)
 
-        # Garante que o locale está configurado para formatação correta
-        try:
-            locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
-        except locale.Error:
-            # Se o locale pt_BR não estiver disponível, podemos criar uma formatação manual
-            # para evitar que o app quebre.
-            pass
+        # Configura o locale para português do Brasil sem quebrar no servidor
+        def configurar_locale_br():
+            locais_tentativa = [
+                "pt_BR.UTF-8",          # Linux mais comum
+                "pt_BR.utf8",           # variação Linux
+                "Portuguese_Brazil.1252",  # Windows
+                ""                      # locale padrão do sistema
+            ]
+        
+            for loc in locais_tentativa:
+                try:
+                    locale.setlocale(locale.LC_ALL, loc)
+                    return loc
+                except locale.Error:
+                    continue
+        
+            return None
+        
+        LOCALE_ATIVO = configurar_locale_br()
 
         # ===============================================
         # Função para calcular distância real com OSRM
