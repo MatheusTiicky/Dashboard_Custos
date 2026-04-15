@@ -1781,9 +1781,12 @@ st.markdown("""
 
 # Configura o locale para português do Brasil
 try:
-    locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
+    locale.setlocale(locale.LC_ALL, "pt_BR.UTF-8")
 except locale.Error:
-    st.warning("Locale 'pt_BR.UTF-8' não encontrado.")
+    try:
+        locale.setlocale(locale.LC_ALL, "pt_BR.utf8")
+    except locale.Error:
+        pass
 
 # =================================================
 # 🔹 CONFIGURAÇÕES GLOBAIS E REGRAS DE NEGÓCIO
