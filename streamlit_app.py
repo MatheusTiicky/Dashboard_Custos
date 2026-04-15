@@ -4518,6 +4518,198 @@ with tab1:
             </style>
             """, unsafe_allow_html=True)
 
+
+            st.markdown("""
+            <style>
+            /* ===== Upgrade premium do cabeçalho financeiro + legenda à direita ===== */
+            .performance-chart-head{
+                position: relative;
+                z-index: 1;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 22px;
+                padding: 18px 22px;
+                border-radius: 24px;
+                margin-bottom: 10px;
+                background:
+                    radial-gradient(circle at top left, rgba(34, 211, 238, 0.10) 0%, transparent 24%),
+                    radial-gradient(circle at 88% 18%, rgba(59, 130, 246, 0.10) 0%, transparent 24%),
+                    linear-gradient(180deg, rgba(10, 16, 30, 0.96) 0%, rgba(7, 12, 24, 0.98) 100%);
+                border: 1px solid rgba(96, 165, 250, 0.14);
+                box-shadow:
+                    inset 0 1px 0 rgba(255,255,255,0.05),
+                    0 16px 34px rgba(0,0,0,0.26);
+                overflow: hidden;
+            }
+            .performance-chart-head::before{
+                content: "";
+                position: absolute;
+                inset: 0 auto auto 0;
+                width: 100%;
+                height: 2px;
+                background: linear-gradient(
+                    90deg,
+                    rgba(34, 211, 238, 0.00) 0%,
+                    rgba(34, 211, 238, 0.42) 22%,
+                    rgba(37, 99, 235, 0.20) 50%,
+                    rgba(34, 211, 238, 0.42) 78%,
+                    rgba(34, 211, 238, 0.00) 100%
+                );
+            }
+            .performance-chart-kicker-row{
+                display: none !important;
+            }
+            .performance-chart-title-row{
+                display: contents;
+            }
+            .performance-chart-title-group{
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                min-width: 0;
+                flex: 1 1 auto;
+            }
+            .performance-chart-title-icon{
+                width: 52px;
+                height: 52px;
+                min-width: 52px;
+                border-radius: 18px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: #e0f2fe;
+                background: linear-gradient(180deg, rgba(34, 211, 238, 0.20) 0%, rgba(37, 99, 235, 0.20) 100%);
+                border: 1px solid rgba(96, 165, 250, 0.18);
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 24px rgba(0,0,0,0.18);
+                font-size: 1.10rem;
+            }
+            .performance-chart-title-wrap{
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                min-width: 0;
+            }
+            .performance-chart-title{
+                font-family: "Poppins", "Segoe UI", sans-serif;
+                font-size: 1.52rem;
+                font-weight: 700;
+                color: #f8fafc;
+                margin: 0;
+                line-height: 1.08;
+                letter-spacing: -0.35px;
+            }
+            .performance-chart-subtitle{
+                font-size: 0.86rem;
+                color: #94a3b8;
+                margin: 0;
+                line-height: 1.45;
+                max-width: 720px;
+            }
+            .performance-chart-meta{
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+                margin-top: 2px;
+            }
+            .performance-chart-meta-chip{
+                display: inline-flex;
+                align-items: center;
+                gap: 7px;
+                padding: 7px 11px;
+                border-radius: 999px;
+                background: rgba(9, 18, 38, 0.48);
+                border: 1px solid rgba(148, 163, 184, 0.12);
+                color: #c7d2fe;
+                font-size: 0.72rem;
+                font-weight: 600;
+            }
+            .performance-chart-meta-chip i{
+                color: #38bdf8;
+                font-size: 0.74rem;
+            }
+            .performance-chart-legend-side{
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                justify-content: center;
+                gap: 10px;
+                min-width: 280px;
+            }
+            .performance-chart-legend-title{
+                font-size: 0.70rem;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+                color: #7dd3fc;
+                font-weight: 700;
+            }
+            .performance-chart-legend{
+                display: flex;
+                align-items: center;
+                justify-content: flex-end;
+                gap: 10px;
+                flex-wrap: wrap;
+            }
+            .performance-chart-legend-item{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 12px;
+                border-radius: 999px;
+                background: rgba(9, 18, 38, 0.58);
+                border: 1px solid rgba(148, 163, 184, 0.14);
+                color: #e2e8f0;
+                font-size: 0.76rem;
+                font-weight: 600;
+                box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+            }
+            .performance-chart-legend-dot{
+                width: 10px;
+                height: 10px;
+                border-radius: 999px;
+                display: inline-block;
+                box-shadow: 0 0 10px rgba(255,255,255,0.18);
+            }
+            .performance-chart-legend-dot.receita{ background: #1ea7ff; }
+            .performance-chart-legend-dot.custo{ background: #f59e0b; }
+            .performance-chart-legend-dot.lucro{ background: #22c55e; }
+            @media (max-width: 1100px){
+                .performance-chart-head{
+                    flex-direction: column;
+                    align-items: stretch;
+                }
+                .performance-chart-legend-side{
+                    align-items: flex-start;
+                    min-width: 100%;
+                }
+                .performance-chart-legend{
+                    justify-content: flex-start;
+                }
+            }
+            html[data-theme="light"] .performance-chart-head{
+                background:
+                    radial-gradient(circle at top left, rgba(34, 211, 238, 0.10) 0%, transparent 24%),
+                    radial-gradient(circle at 88% 18%, rgba(59, 130, 246, 0.10) 0%, transparent 24%),
+                    linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+                border-color: rgba(15, 23, 42, 0.08);
+                box-shadow: 0 18px 34px rgba(15, 23, 42, 0.08);
+            }
+            html[data-theme="light"] .performance-chart-title{
+                color: #0f172a;
+            }
+            html[data-theme="light"] .performance-chart-subtitle{
+                color: #64748b;
+            }
+            html[data-theme="light"] .performance-chart-meta-chip,
+            html[data-theme="light"] .performance-chart-legend-item{
+                background: rgba(241, 245, 249, 0.96);
+                border-color: rgba(148, 163, 184, 0.20);
+                color: #475569;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
             titulo_grafico_col, filtro_grafico_col = st.columns([0.68, 0.32], gap="medium")
 
             indice_padrao = 0 if periodo_tipo in ["Mês Completo", "Período Personalizado"] else 0
@@ -4566,8 +4758,6 @@ with tab1:
             with titulo_grafico_col:
                 st.markdown(f"""
                 <div class="performance-chart-head">
-                    <div class="performance-chart-kicker-row">
-                    </div>
                     <div class="performance-chart-title-row">
                         <div class="performance-chart-title-group">
                             <div class="performance-chart-title-icon"><i class="fa-solid fa-chart-line"></i></div>
@@ -4575,10 +4765,25 @@ with tab1:
                                 <div class="performance-chart-title">Evolução de Receita x Custo x Lucro</div>
                                 <div class="performance-chart-subtitle">{subtitulo_grafico}</div>
                                 <div class="performance-chart-meta">
-                                    <span class="performance-chart-meta-chip"><i class="fa-solid fa-wave-square"></i> Receita, custo e lucro</span>
+                                    <span class="performance-chart-meta-chip"><i class="fa-solid fa-sparkles"></i> Painel executivo</span>
                                     <span class="performance-chart-meta-chip"><i class="fa-regular fa-calendar"></i> {chip_modo_grafico}</span>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <div class="performance-chart-legend-side">
+                        <div class="performance-chart-legend-title">Legenda</div>
+                        <div class="performance-chart-legend">
+                            <span class="performance-chart-legend-item">
+                                <span class="performance-chart-legend-dot receita"></span> Receita
+                            </span>
+                            <span class="performance-chart-legend-item">
+                                <span class="performance-chart-legend-dot custo"></span> Custo
+                            </span>
+                            <span class="performance-chart-legend-item">
+                                <span class="performance-chart-legend-dot lucro"></span> Lucro
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -4750,16 +4955,7 @@ with tab1:
                                 domain=dominio_legenda,
                                 range=cores_legenda
                             ),
-                            legend=alt.Legend(
-                                orient='top',
-                                direction='horizontal',
-                                columns=3,
-                                labelColor='#e2e8f0',
-                                symbolType='stroke',
-                                symbolStrokeWidth=4,
-                                padding=6,
-                                offset=10
-                            )
+                            legend=None
                         ),
                         tooltip=tooltip_grafico
                     )
